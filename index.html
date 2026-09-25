@@ -68,7 +68,6 @@
       const [editingLedgerId, setEditingLedgerId] = useState(null);
       const [editLedgerData, setEditLedgerData] = useState({});
 
-      // 회계 장부 전체 선택용 state
       const [selectedLedgerIds, setSelectedLedgerIds] = useState([]);
 
       const [rules, setRules] = useState({
@@ -102,8 +101,14 @@
         const lgRef = db.ref('ledger');
         lgRef.on('value', snapshot => {
           const data = snapshot.val();
-          if (data) setLedger(Object.keys(data).map(k => ({ id: k, ...data[k] })));
-          else setLedger([]);
+          if (data) {
+            const list = Object.keys(data).map(k => ({ id: k, ...data[k] }));
+            // 날짜 기준 자동 정렬 (최신순 또는 오래된순 - 여기서는 최신순 정렬, 필요시 a.date.localeCompare(b.date)로 변경 가능)
+            list.sort((a, b) => (b.date || '').localeCompare(a.date || ''));
+            setLedger(list);
+          } else {
+            setLedger([]);
+          }
         });
 
         const sfRef = db.ref('staff');
@@ -146,27 +151,13 @@
         let updatedLogs = { ...logs };
 
         if (existingLogKey) {
-          updatedLogs[existingLogKey] = {
-            ...updatedLogs[existingLogKey],
-            startTime: timeStr
-          };
+          updatedLogs[existingLogKey] = { ...updatedLogs[existingLogKey], startTime: timeStr };
         } else {
           const newKey = String(Date.now());
-          updatedLogs[newKey] = {
-            date: dateStr,
-            startTime: timeStr,
-            endTime: '-',
-            lessonNote: '',
-            note: ''
-          };
+          updatedLogs[newKey] = { date: dateStr, startTime: timeStr, endTime: '-', lessonNote: '', note: '' };
         }
 
-        const updateData = { 
-          lessonCount: nextCount, 
-          lastAttendanceDate: dateStr,
-          logs: updatedLogs
-        };
-
+        const updateData = { lessonCount: nextCount, lastAttendanceDate: dateStr, logs: updatedLogs };
         if (db) db.ref(`students/${id}`).update(updateData);
       };
 
@@ -183,19 +174,10 @@
         let updatedLogs = { ...logs };
 
         if (existingLogKey) {
-          updatedLogs[existingLogKey] = {
-            ...updatedLogs[existingLogKey],
-            endTime: timeStr
-          };
+          updatedLogs[existingLogKey] = { ...updatedLogs[existingLogKey], endTime: timeStr };
         } else {
           const newKey = String(Date.now());
-          updatedLogs[newKey] = {
-            date: dateStr,
-            startTime: '-',
-            endTime: timeStr,
-            lessonNote: '',
-            note: ''
-          };
+          updatedLogs[newKey] = { date: dateStr, startTime: '-', endTime: timeStr, lessonNote: '', note: '' };
         }
 
         if (db) db.ref(`students/${id}`).update({ logs: updatedLogs });
@@ -218,10 +200,7 @@
 
         const updatedLogs = {
           ...target.logs,
-          [logKey]: {
-            ...target.logs[logKey],
-            [field]: value
-          }
+          [logKey]: { ...target.logs[logKey], [field]: value }
         };
 
         if (db) db.ref(`students/${studentId}`).update({ logs: updatedLogs });
@@ -323,7 +302,6 @@
         if (db) db.ref(`ledger/${id}`).remove();
       };
 
-      // 회계 장부 전체선택 및 전체/선택 삭제 함수
       const handleSelectAllLedger = (e) => {
         if (e.target.checked) {
           setSelectedLedgerIds(ledger.map(item => item.id));
@@ -393,15 +371,14 @@
 
               let importedCount = 0;
               rowsData.forEach((row, idx) => {
-                if (idx === 0 || !row || row.length < 5) return;
+                if (idx === 0 || !row || row.length < 4) return;
 
-                const dateRaw = String(row[1] || '').trim();
-                const dateMatch = dateRaw.match(/\d{4}[\/.-]\d{1,2}[\/.-]\d{1,2}/);
-                if (!dateMatch) return;
-                const date = dateMatch[0].replace(/\./g, "-").replace(/\//g, "-");
+                let dateRaw = String(row[1] || '').trim();
+                let dateMatch = dateRaw.match(/\d{4}[\/.-]\d{1,2}[\/.-]\d{1,2}/);
+                let date = dateMatch ? dateMatch[0].replace(/\./g, "-").replace(/\//g, "-") : new Date().toISOString().split('T')[0];
 
-                const deposit = Number(String(row[3] || '').replace(/[^0-9]/g, '')) || 0;
-                if (deposit === 0) return;
+                const amount = Number(String(row[3] || '').replace(/[^0-9]/g, '')) || 0;
+                if (amount === 0) return;
 
                 const cardCompany = String(row[2] || '카드').trim();
                 const content = String(row[4] || '').trim();
@@ -411,7 +388,7 @@
                 const item = {
                   id,
                   date,
-                  deposit,
+                  deposit: amount,
                   withdrawal: 0,
                   method: "카드",
                   note: `[${cardCompany}] ${content} ${memo}`.trim()
@@ -423,7 +400,7 @@
                 importedCount++;
               });
 
-              alert(`성공! 정제된 파일에서 총 ${importedCount}건의 내역이 회계 장부에 등록되었습니다.`);
+              alert(`성공! 카드 정제 파일에서 총 ${importedCount}건의 내역이 회계 장부에 등록되었습니다.`);
 
             } else {
               const parser = new DOMParser();
@@ -436,7 +413,7 @@
               }
 
               let importedCount = 0;
-              const CARD_KEYWORDS = ["NH168", "KB110", "롯데", "삼성카드", "SHC", "현1631", "우6011", "가맹점", "카드"];
+              const CARD_KEYWORDS = ["NH168", "KB110", "롯데", "삼성카드", "SHC", "현1631", "우6011", "가맹점", "카드", "하나"];
 
               rows.forEach((row, idx) => {
                 const cols = Array.from(row.querySelectorAll('td, th')).map(td => td.textContent.trim());
@@ -450,7 +427,8 @@
                 const withdrawal = Number((cols[2] || '').replace(/[^0-9]/g, '')) || 0;
                 const deposit = Number((cols[3] || '').replace(/[^0-9]/g, '')) || 0;
 
-                if (withdrawal === 0 && deposit === 0) return;
+                const amount = deposit > 0 ? deposit : withdrawal;
+                if (amount === 0) return;
 
                 const content = cols[5] || '';
                 const memo = cols[6] || '';
@@ -460,19 +438,15 @@
                 const isCardTx = CARD_KEYWORDS.some(keyword => fullText.includes(keyword));
                 if (!isCardTx) return;
 
-                let method = "카드";
-                if (fullText.includes("현금")) method = "현금";
-                else if (fullText.includes("이체")) method = "계좌이체";
-
                 const id = String(Date.now()) + "_" + idx + "_" + Math.floor(Math.random() * 1000);
                 const noteText = [content, memo].filter(Boolean).join(" / ") || "카드매입거래";
 
                 const item = {
                   id,
                   date,
-                  deposit,
-                  withdrawal,
-                  method,
+                  deposit: deposit > 0 ? deposit : 0,
+                  withdrawal: withdrawal > 0 ? withdrawal : 0,
+                  method: "카드",
                   note: `[카드매입] ${noteText}`
                 };
 
@@ -482,7 +456,7 @@
                 importedCount++;
               });
 
-              alert(`성공! 농협 원본 파일에서 카드 매입 내역 총 ${importedCount}건이 등록되었습니다.`);
+              alert(`성공! 원본 파일에서 카드 매입 내역 총 ${importedCount}건이 등록되었습니다.`);
             }
 
             e.target.value = "";
@@ -855,7 +829,7 @@
                             </div>
 
                             {logKeys.length === 0 ? (
-                              <div className="text-center text-slate-400 py-4 text-[11px]">아직 기록된 레슨 날짜가 없습니다. (수업 시작 버튼을 누르면 날짜가 추가됩니다)</div>
+                              <div className="text-center text-slate-400 py-4 text-[11px]">아직 기록된 레슨 날짜가 없습니다.</div>
                             ) : (
                               <div className="space-y-1.5">
                                 {logKeys.map(logKey => {
@@ -1012,7 +986,7 @@
 
               <div className="bg-white p-4 rounded-2xl shadow-sm border border-slate-100 space-y-3">
                 <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-2">
-                  <h3 className="font-bold text-slate-900 text-sm">회계 장부 내역 ({ledger.length}건)</h3>
+                  <h3 className="font-bold text-slate-900 text-sm">회계 장부 내역 ({ledger.length}건 - 날짜 자동 정렬됨)</h3>
                   <div className="flex gap-2">
                     <button 
                       onClick={handleDeleteSelectedLedger}
