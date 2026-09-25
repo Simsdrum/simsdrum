@@ -101,14 +101,50 @@
         const lgRef = db.ref('ledger');
         lgRef.on('value', snapshot => {
           const data = snapshot.val();
+          let list = [];
           if (data) {
-            const list = Object.keys(data).map(k => ({ id: k, ...data[k] }));
-            // 날짜 기준 최신순 자동 정렬
-            list.sort((a, b) => (b.date || '').localeCompare(a.date || ''));
-            setLedger(list);
-          } else {
-            setLedger([]);
+            list = Object.keys(data).map(k => ({ id: k, ...data[k] }));
           }
+
+          // 자동 월세 고정지출 생성 (매월 1일, 19일 55만원)
+          // 기존 장부와 겹치지 않게 가상 생성 혹은 기본 포함 처리
+          const existingDates = new Set(list.map(l => `${l.date}_${l.withdrawal}_${l.note}`));
+          
+          // 2025년 9월부터 현재 연도 연말까지 자동 월세 생성 주입
+          const startDate = new Date(2025, 8, 1); // 2025-09-01
+          const endDate = new Date(2028, 11, 31);
+          let curr = new Date(startDate);
+
+          while (curr <= endDate) {
+            const y = curr.getFullYear();
+            const m = String(curr.getMonth() + 1).padStart(2, '0');
+            
+            [1, 19].forEach(day => {
+              const dStr = `${y}-${m}-${String(day).padStart(2, '0')}`;
+              const noteStr = "월세 고정지출";
+              const keyCheck = `${dStr}_550000_${noteStr}`;
+
+              // 사용자가 직접 지우거나 하지 않았다면 가상 항목으로 추가
+              if (!existingDates.has(keyCheck)) {
+                // 아직 미래 날짜가 아닐 경우 또는 전체 기간에 대해 포함
+                list.push({
+                  id: `auto_rent_${y}_${m}_${day}`,
+                  date: dStr,
+                  deposit: 0,
+                  withdrawal: 550000,
+                  method: "계좌이체",
+                  note: "월세 고정지출 (자동)",
+                  isAutoRent: true
+                });
+              }
+            });
+
+            curr.setMonth(curr.getMonth() + 1);
+          }
+
+          // 날짜 기준 최신순 자동 정렬
+          list.sort((a, b) => (b.date || '').localeCompare(a.date || ''));
+          setLedger(list);
         });
 
         const sfRef = db.ref('staff');
@@ -298,8 +334,15 @@
         setNewLedger({ date: new Date().toISOString().split('T')[0], deposit: "", withdrawal: "", method: "카드", note: "" });
       };
 
-      const deleteLedger = (id) => {
-        if (db) db.ref(`ledger/${id}`).remove();
+      const deleteLedger = (item) => {
+        if (item.isAutoRent) {
+          // 자동 생성된 월세를 DB에 실제로 등록하여 숨기거나 삭제 처리
+          if (confirm(`${item.date} 월세 지출 건을 장부에서 제외(삭제)하시겠습니까?`)) {
+            if (db) db.ref(`ledger/${item.id}`).set({ deleted: true, ...item });
+          }
+          return;
+        }
+        if (db) db.ref(`ledger/${item.id}`).remove();
       };
 
       const handleSelectAllLedger = (e) => {
@@ -326,7 +369,12 @@
         if (confirm(`선택한 ${selectedLedgerIds.length}건의 장부 내역을 삭제하시겠습니까?`)) {
           if (db) {
             selectedLedgerIds.forEach(id => {
-              db.ref(`ledger/${id}`).remove();
+              const target = ledger.find(l => l.id === id);
+              if (target && target.isAutoRent) {
+                db.ref(`ledger/${id}`).set({ deleted: true, ...target });
+              } else {
+                db.ref(`ledger/${id}`).remove();
+              }
             });
           }
           setSelectedLedgerIds([]);
@@ -499,10 +547,10 @@
         return `${baseUrl}?teacher=${encodeURIComponent(tName)}`;
       };
 
-      // 월별 집계 데이터 계산 함수
+      // 월별 집계 데이터 계산 함수 (삭제된 항목 제외)
       const getMonthlySummary = () => {
         const summary = {};
-        ledger.forEach(item => {
+        ledger.filter(item => !item.deleted).forEach(item => {
           if (!item.date) return;
           const monthKey = item.date.substring(0, 7); // "YYYY-MM"
           if (!summary[monthKey]) {
@@ -512,11 +560,11 @@
           summary[monthKey].withdrawal += Number(item.withdrawal || 0);
           summary[monthKey].count += 1;
         });
-        // 최신 월 순서로 정렬
         return Object.values(summary).sort((a, b) => b.month.localeCompare(a.month));
       };
 
       const monthlySummary = getMonthlySummary();
+      const activeLedgerList = ledger.filter(item => !item.deleted);
 
       const daysOfWeek = ["월요일", "화요일", "수요일", "목요일", "금요일", "토요일", "일요일"];
       const timeSlots = ["10:00", "11:00", "13:00", "14:00", "15:00", "16:00", "17:00", "18:00", "19:00", "20:00", "21:00"];
@@ -975,10 +1023,10 @@
 
           {activeTab === 'ledger' && !isTeacherMode && (
             <div className="space-y-4">
-              {/* 월별 토탈 집계 요약 카드 영역 */}
+              {/* 월별 토탈 집계 요약 카드 영역 (월세 고정지출 자동 반영) */}
               <div className="bg-white p-4 rounded-2xl shadow-sm border border-slate-100 space-y-3">
                 <h3 className="font-bold text-slate-900 text-sm flex items-center gap-1.5">
-                  📊 월별 토탈 금액 집계 (수입/지출/순수익)
+                  📊 월별 토탈 금액 집계 (수입/지출/순수익 - 월세 매월 1일, 19일 55만 원 자동반영)
                 </h3>
                 <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-2.5">
                   {monthlySummary.map(m => {
@@ -995,7 +1043,7 @@
                             <span className="font-bold text-emerald-600">+{m.deposit.toLocaleString()}원</span>
                           </div>
                           <div className="flex justify-between">
-                            <span className="text-slate-500">지출:</span>
+                            <span className="text-slate-500">지출(월세포함):</span>
                             <span className="font-bold text-rose-600">-{m.withdrawal.toLocaleString()}원</span>
                           </div>
                           <div className="flex justify-between pt-1 border-t border-slate-200 font-bold">
@@ -1044,7 +1092,7 @@
 
               <div className="bg-white p-4 rounded-2xl shadow-sm border border-slate-100 space-y-3">
                 <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-2">
-                  <h3 className="font-bold text-slate-900 text-sm">회계 장부 내역 ({ledger.length}건 - 날짜 자동 정렬됨)</h3>
+                  <h3 className="font-bold text-slate-900 text-sm">회계 장부 내역 ({activeLedgerList.length}건 - 월세 고정지출 자동 반영됨)</h3>
                   <div className="flex gap-2">
                     <button 
                       onClick={handleDeleteSelectedLedger}
@@ -1069,7 +1117,7 @@
                           <input 
                             type="checkbox" 
                             onChange={handleSelectAllLedger}
-                            checked={ledger.length > 0 && selectedLedgerIds.length === ledger.length}
+                            checked={activeLedgerList.length > 0 && selectedLedgerIds.length === activeLedgerList.length}
                           />
                         </th>
                         <th className="p-3">일자</th>
@@ -1081,11 +1129,11 @@
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-100">
-                      {ledger.map(item => {
+                      {activeLedgerList.map(item => {
                         const isEditing = editingLedgerId === item.id;
                         const isChecked = selectedLedgerIds.includes(item.id);
                         return (
-                          <tr key={item.id} className={isChecked ? "bg-blue-50/40" : ""}>
+                          <tr key={item.id} className={isChecked ? "bg-blue-50/40" : item.isAutoRent ? "bg-rose-50/30" : ""}>
                             <td className="p-3 text-center">
                               <input 
                                 type="checkbox" 
@@ -1149,7 +1197,7 @@
             <div className="bg-white p-4 rounded-2xl shadow-sm border border-slate-100 space-y-3">
               <h3 className="font-bold text-slate-900 text-sm">교습비 수납 영수증 원부</h3>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                {ledger.filter(l => (l.deposit || 0) > 0).map(item => (
+                {ledger.filter(l => !l.deleted && (l.deposit || 0) > 0).map(item => (
                   <div key={item.id} className="border border-slate-200 p-4 rounded-xl space-y-2 bg-slate-50/30 text-xs">
                     <div className="flex justify-between items-center border-b pb-2">
                       <span className="font-bold text-slate-800">교습비 납부 영수증</span>
@@ -1254,7 +1302,7 @@
                               <>
                                 <button onClick={() => saveStaffEdit(st.id)} className="bg-emerald-600 text-white px-2 py-1 rounded text-[11px] font-bold">저장</button>
                                 <button onClick={() => setEditingStaffId(null)} className="bg-slate-200 text-slate-700 px-2 py-1 rounded text-[11px]">취소</button>
-                              </>
+                            </>
                             ) : (
                               <>
                                 <button onClick={() => { setEditingStaffId(st.id); setEditStaffData({name: st.name, role: st.role, subject: st.subject, hireDate: st.hireDate, checkCrime: st.checkCrime, checkSex: st.checkSex}); }} className="bg-slate-100 hover:bg-slate-200 text-slate-700 px-2 py-1 rounded text-[11px]">✏️</button>
