@@ -19,24 +19,25 @@
   <script type="text/babel">
     const { useState, useEffect } = React;
 
-    // 🔴 Firebase 클라우드 설정 (필요 시 본인 키로 교체)
+    // 🔴 원장님의 Firebase 클라우드 데이터베이스 키 완벽 연동
     const firebaseConfig = {
-      apiKey: "YOUR_API_KEY",
-      authDomain: "YOUR_PROJECT.firebaseapp.com",
-      databaseURL: "https://YOUR_PROJECT-default-rtdb.asia-northeast1.firebasedatabase.app",
-      projectId: "YOUR_PROJECT",
-      storageBucket: "YOUR_PROJECT.appspot.com",
-      messagingSenderId: "YOUR_SENDER_ID",
-      appId: "YOUR_APP_ID"
+      apiKey: "AIzaSyArl8_qT9eUfofH9IgK41xtdSPc2DwoB6g",
+      authDomain: "simsdrum-33e61.firebaseapp.com",
+      databaseURL: "https://simsdrum-33e61-default-rtdb.firebaseio.com",
+      projectId: "simsdrum-33e61",
+      storageBucket: "simsdrum-33e61.firebasestorage.app",
+      messagingSenderId: "797121281913",
+      appId: "1:797121281913:web:892c9f4de182799ecfb9a8",
+      measurementId: "G-P8VGZ9WZ0K"
     };
 
     let db = null;
     try {
-      if (!firebase.apps.length && firebaseConfig.apiKey !== "YOUR_API_KEY") {
+      if (!firebase.apps.length) {
         firebase.initializeApp(firebaseConfig);
-        db = firebase.database();
       }
-    } catch(e) { console.log("로컬 모드로 작동합니다."); }
+      db = firebase.database();
+    } catch(e) { console.log("Firebase 연결 확인 중...", e); }
 
     function App() {
       const urlParams = new URLSearchParams(window.location.search);
@@ -46,117 +47,95 @@
       const [activeTab, setActiveTab] = useState('students');
       const [selectedTeacher, setSelectedTeacher] = useState(urlTeacher || '전체');
 
-      // 로컬 스토리지 / 클라우드 통합 상태
-      const [rules, setRules] = useState(() => JSON.parse(localStorage.getItem('app_rules')) || {
+      const [rules, setRules] = useState({
         academyName: "심스드럼실용음악학원",
         regNum: "제 1234호",
         courses: [
           { id: 1, teacher: "김드럼", name: "드럼 기초반 (주1회/4회)", fee: 200000, hours: "4회 / 회당 50분" },
           { id: 2, teacher: "박보컬", name: "보컬 취미반 (주1회/4회)", fee: 220000, hours: "4회 / 회당 50분" }
-        ],
-        refundRule: "학원법 시행령 제18조3항에 의거, 교습 개시 전 이미 납부한 교습비 전액 반환, 교습 개시 후 1/3 경과 전 2/3 반환, 1/2 경과 전 1/2 반환, 1/2 경과 후 반환하지 아니함."
+        ]
       });
 
-      const [students, setStudents] = useState(() => JSON.parse(localStorage.getItem('app_students')) || [
-        { id: '1', name: "김철수", birth: "2010-05-12", phone: "010-1234-5678", teacher: "김드럼", course: "드럼 기초반 (주1회/4회)", lessonCount: 2, lastAttendance: "2026-09-25 19:30", lessonNote: "8비트 리듬 연습", note: "손목 힘 빼기 지도" }
-      ]);
+      const [students, setStudents] = useState([]);
+      const [ledger, setLedger] = useState([]);
+      const [staff, setStaff] = useState([]);
 
-      const [ledger, setLedger] = useState(() => JSON.parse(localStorage.getItem('app_ledger')) || [
-        { id: '1', date: "2026-09-01", type: "수입", amount: 200000, method: "카드", note: "김철수 수강료" }
-      ]);
-
-      const [staff, setStaff] = useState(() => JSON.parse(localStorage.getItem('app_staff')) || [
-        { id: '1', name: "김드럼", role: "강사", subject: "드럼", hireDate: "2025-03-01", checkCrime: true, checkSex: true }
-      ]);
-
-      // 입력 폼
+      // 입력 폼 State
       const [newCourse, setNewCourse] = useState({ teacher: "", name: "", fee: "", hours: "4회 / 회당 50분" });
       const [newStudent, setNewStudent] = useState({ name: "", birth: "", phone: "", course: "" });
       const [newLedger, setNewLedger] = useState({ date: new Date().toISOString().split('T')[0], type: "수입", amount: "", method: "카드", note: "" });
       const [newStaff, setNewStaff] = useState({ name: "", role: "강사", subject: "드럼", hireDate: new Date().toISOString().split('T')[0], checkCrime: true, checkSex: true });
 
-      // 로컬 스토리지 자동 저장
-      useEffect(() => { localStorage.setItem('app_rules', JSON.stringify(rules)); }, [rules]);
-      useEffect(() => { localStorage.setItem('app_students', JSON.stringify(students)); }, [students]);
-      useEffect(() => { localStorage.setItem('app_ledger', JSON.stringify(ledger)); }, [ledger]);
-      useEffect(() => { localStorage.setItem('app_staff', JSON.stringify(staff)); }, [staff]);
-
-      // Firebase 실시간 동기화 (DB 설정 시)
+      // Firebase 실시간 동기화
       useEffect(() => {
         if (!db) return;
+
         const stRef = db.ref('students');
         stRef.on('value', snapshot => {
           const data = snapshot.val();
           if (data) setStudents(Object.keys(data).map(k => ({ id: k, ...data[k] })));
+          else setStudents([]);
         });
+
         const lgRef = db.ref('ledger');
         lgRef.on('value', snapshot => {
           const data = snapshot.val();
           if (data) setLedger(Object.keys(data).map(k => ({ id: k, ...data[k] })));
+          else setLedger([]);
         });
+
         const sfRef = db.ref('staff');
         sfRef.on('value', snapshot => {
           const data = snapshot.val();
           if (data) setStaff(Object.keys(data).map(k => ({ id: k, ...data[k] })));
+          else setStaff([]);
         });
-        return () => { stRef.off(); lgRef.off(); sfRef.off(); };
+
+        const rlRef = db.ref('rules');
+        rlRef.on('value', snapshot => {
+          const data = snapshot.val();
+          if (data) setRules(data);
+        });
+
+        return () => { stRef.off(); lgRef.off(); sfRef.off(); rlRef.off(); };
       }, []);
 
-      // 이름 클릭 ➔ 수업 시작 (현재시간 연동 및 1회 차감)
+      // 수업 시작 (현재시간 체크 및 1회 차감 + 실시간 세이브)
       const handleStartLesson = (id) => {
         const now = new Date();
         const timeStr = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-${String(now.getDate()).padStart(2,'0')} ${String(now.getHours()).padStart(2,'0')}:${String(now.getMinutes()).padStart(2,'0')}`;
         
-        const updated = students.map(s => {
-          if (s.id === id) {
-            const nextCount = Math.min(4, (s.lessonCount || 0) + 1);
-            return { ...s, lessonCount: nextCount, lastAttendance: timeStr };
-          }
-          return s;
-        });
+        const target = students.find(s => s.id === id);
+        if (!target) return;
 
-        setStudents(updated);
-        if (db) {
-          const target = updated.find(s => s.id === id);
-          db.ref(`students/${id}`).update({ lessonCount: target.lessonCount, lastAttendance: target.lastAttendance });
-        }
+        const nextCount = Math.min(4, (target.lessonCount || 0) + 1);
+        const updateData = { lessonCount: nextCount, lastAttendance: timeStr };
+
+        if (db) db.ref(`students/${id}`).update(updateData);
       };
 
-      // 레슨 카운트 조절
       const updateLessonCount = (id, delta) => {
-        const updated = students.map(s => {
-          if (s.id === id) {
-            const nextCount = Math.min(4, Math.max(0, (s.lessonCount || 0) + delta));
-            return { ...s, lessonCount: nextCount };
-          }
-          return s;
-        });
-        setStudents(updated);
-        if (db) {
-          const target = updated.find(s => s.id === id);
-          db.ref(`students/${id}`).update({ lessonCount: target.lessonCount });
-        }
+        const target = students.find(s => s.id === id);
+        if (!target) return;
+        const nextCount = Math.min(4, Math.max(0, (target.lessonCount || 0) + delta));
+        if (db) db.ref(`students/${id}`).update({ lessonCount: nextCount });
       };
 
       const resetLessonCount = (id) => {
-        const updated = students.map(s => s.id === id ? { ...s, lessonCount: 0 } : s);
-        setStudents(updated);
         if (db) db.ref(`students/${id}`).update({ lessonCount: 0 });
       };
 
       const handleDetailChange = (id, field, value) => {
-        const updated = students.map(s => s.id === id ? { ...s, [field]: value } : s);
-        setStudents(updated);
         if (db) db.ref(`students/${id}`).update({ [field]: value });
       };
 
-      // 수강생 추가
       const addStudent = (e) => {
         e.preventDefault();
         if (!newStudent.name) return;
         const selectedObj = (rules.courses || []).find(c => c.name === newStudent.course) || rules.courses[0];
+        const id = String(Date.now());
         const newObj = {
-          id: String(Date.now()),
+          id,
           name: newStudent.name,
           birth: newStudent.birth,
           phone: newStudent.phone,
@@ -167,49 +146,42 @@
           lessonNote: "",
           note: ""
         };
-
-        setStudents([...students, newObj]);
-        if (db) db.ref(`students/${newObj.id}`).set(newObj);
+        if (db) db.ref(`students/${id}`).set(newObj);
         setNewStudent({ name: "", birth: "", phone: "", course: "" });
       };
 
       const deleteStudent = (id) => {
-        setStudents(students.filter(s => s.id !== id));
         if (db) db.ref(`students/${id}`).remove();
       };
 
-      // 과목 추가
       const addCourse = (e) => {
         e.preventDefault();
         if (!newCourse.name || !newCourse.fee) return;
         const updatedCourses = [...(rules.courses || []), { ...newCourse, id: Date.now(), fee: Number(newCourse.fee) }];
-        setRules({ ...rules, courses: updatedCourses });
-        if (db) db.ref('rules/courses').set(updatedCourses);
+        const newRules = { ...rules, courses: updatedCourses };
+        if (db) db.ref('rules').set(newRules);
         setNewCourse({ teacher: "", name: "", fee: "", hours: "4회 / 회당 50분" });
       };
 
       const deleteCourse = (id) => {
         const updatedCourses = (rules.courses || []).filter(c => c.id !== id);
-        setRules({ ...rules, courses: updatedCourses });
-        if (db) db.ref('rules/courses').set(updatedCourses);
+        const newRules = { ...rules, courses: updatedCourses };
+        if (db) db.ref('rules').set(newRules);
       };
 
-      // 수입/지출 추가
       const addLedger = (e) => {
         e.preventDefault();
         if (!newLedger.amount) return;
-        const newItem = { id: String(Date.now()), ...newLedger, amount: Number(newLedger.amount) };
-        setLedger([newItem, ...ledger]);
-        if (db) db.ref(`ledger/${newItem.id}`).set(newItem);
+        const id = String(Date.now());
+        const newItem = { id, ...newLedger, amount: Number(newLedger.amount) };
+        if (db) db.ref(`ledger/${id}`).set(newItem);
         setNewLedger({ date: new Date().toISOString().split('T')[0], type: "수입", amount: "", method: "카드", note: "" });
       };
 
       const deleteLedger = (id) => {
-        setLedger(ledger.filter(l => l.id !== id));
         if (db) db.ref(`ledger/${id}`).remove();
       };
 
-      // 외부 엑셀(통장/세무 내역) 자동 업로드 파싱
       const handleFileUpload = (e) => {
         const file = e.target.files[0];
         if (!file) return;
@@ -218,7 +190,7 @@
           const wb = XLSX.read(evt.target.result, { type: 'binary' });
           const ws = wb.Sheets[wb.SheetNames[0]];
           const data = XLSX.utils.sheet_to_json(ws, { header: 1 });
-          const imported = [];
+          let importedCount = 0;
 
           data.forEach((row, idx) => {
             if (idx < 1 || !row || row.length === 0) return;
@@ -229,39 +201,35 @@
 
             if (amount > 0) {
               const isIncome = !str.includes('매입') && !str.includes('지출') && !str.includes('출금');
+              const id = String(Date.now() + idx);
               const item = {
-                id: String(Date.now() + idx),
+                id,
                 date,
                 type: isIncome ? "수입" : "지출",
                 amount,
                 method: str.includes('현금') ? "현금" : (str.includes('이체') ? "계좌이체" : "카드"),
                 note: `[외부엑셀] ${row[1] || row[0] || '금융/세무 내역'}`
               };
-              imported.push(item);
-              if (db) db.ref(`ledger/${item.id}`).set(item);
+              if (db) db.ref(`ledger/${id}`).set(item);
+              importedCount++;
             }
           });
 
-          if (imported.length > 0) {
-            setLedger(prev => [...imported, ...prev]);
-            alert(`외부 엑셀 세무/통장 내역 ${imported.length}건이 성공적으로 자동 동기화되었습니다.`);
-          }
+          alert(`외부 엑셀 내역 ${importedCount}건이 클라우드로 자동 저장되었습니다.`);
         };
         reader.readAsBinaryString(file);
       };
 
-      // 직원 추가
       const addStaff = (e) => {
         e.preventDefault();
         if (!newStaff.name) return;
-        const newItem = { id: String(Date.now()), ...newStaff };
-        setStaff([...staff, newItem]);
-        if (db) db.ref(`staff/${newItem.id}`).set(newItem);
+        const id = String(Date.now());
+        const newItem = { id, ...newStaff };
+        if (db) db.ref(`staff/${id}`).set(newItem);
         setNewStaff({ name: "", role: "강사", subject: "드럼", hireDate: new Date().toISOString().split('T')[0], checkCrime: true, checkSex: true });
       };
 
       const deleteStaff = (id) => {
-        setStaff(staff.filter(s => s.id !== id));
         if (db) db.ref(`staff/${id}`).remove();
       };
 
@@ -277,11 +245,10 @@
 
       return (
         <div className="max-w-6xl mx-auto space-y-4 md:space-y-6">
-          {/* 토스 스타일 상단 헤더 */}
           <header className="flex flex-col md:flex-row justify-between items-start md:items-center bg-white p-5 rounded-3xl shadow-sm border border-slate-100 gap-3">
             <div>
               <span className="text-xs font-bold text-blue-600 bg-blue-50 px-3 py-1 rounded-full">
-                {isTeacherMode ? `👨‍🏫 ${urlTeacher} 선생님 전용` : "👑 원장님 전체 관리 모드"}
+                {isTeacherMode ? `👨‍🏫 ${urlTeacher} 선생님 전용` : "👑 원장님 전체 관리 모드 (실시간 세이브 연동됨)"}
               </span>
               <h1 className="text-xl md:text-2xl font-bold text-slate-900 mt-1">{rules.academyName} <span className="text-xs md:text-sm font-normal text-slate-500">({rules.regNum})</span></h1>
             </div>
@@ -298,7 +265,6 @@
             )}
           </header>
 
-          {/* 5대 비치장부 네비게이션 탭 */}
           {!isTeacherMode && (
             <div className="flex md:grid md:grid-cols-5 gap-2 overflow-x-auto pb-1 md:pb-0">
               {[
@@ -319,10 +285,8 @@
             </div>
           )}
 
-          {/* ④ 수강생 대장 (4회 레슨 카운터 & 시간 연동) */}
           {(activeTab === 'students' || isTeacherMode) && (
             <div className="space-y-4 md:space-y-6">
-              {/* 원장님 전용: 선생님 개인 링크 생성기 */}
               {!isTeacherMode && (
                 <div className="bg-white p-4 rounded-3xl shadow-sm border border-slate-100 space-y-2">
                   <span className="text-xs font-bold text-slate-500 block">🔗 선생님별 전용 개인 링크 (클릭 시 복사):</span>
@@ -344,7 +308,6 @@
                 </div>
               )}
 
-              {/* 신규 수강생 등록 폼 */}
               {!isTeacherMode && (
                 <form onSubmit={addStudent} className="bg-white p-4 md:p-6 rounded-3xl shadow-sm border border-slate-100 grid grid-cols-1 md:grid-cols-5 gap-3 items-end">
                   <div>
@@ -370,16 +333,15 @@
                 </form>
               )}
 
-              {/* 수강생 대장 카드 목록 */}
               <div className="bg-white p-4 md:p-6 rounded-3xl shadow-sm border border-slate-100 space-y-4">
                 <div className="flex justify-between items-center">
                   <h3 className="font-bold text-slate-900 text-base">원생 관리 대장 ({filteredStudents.length}명)</h3>
-                  <span className="text-xs text-blue-600 font-medium">💡 학생 이름 클릭 ➔ [수업 시작] 터치 시 현재시간 출석 + 1회 차감</span>
+                  <span className="text-xs text-blue-600 font-medium">💡 클릭 시 실시간 자동 저장됩니다</span>
                 </div>
 
                 <div className="space-y-3">
                   {filteredStudents.map(s => {
-                    const isDone = s.lessonCount >= 4;
+                    const isDone = (s.lessonCount || 0) >= 4;
                     return (
                       <div key={s.id} className={`p-4 rounded-2xl border transition-all ${isDone ? "bg-rose-50/70 border-rose-200" : "bg-slate-50/50 border-slate-100"}`}>
                         <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-3 mb-3">
@@ -428,7 +390,6 @@
                           </div>
                         </div>
 
-                        {/* 출석시간 / 수업 메모 / 특이사항(비고) 입력란 */}
                         <div className="grid grid-cols-1 md:grid-cols-3 gap-2 pt-2 border-t border-slate-200/60 text-xs">
                           <div className="flex items-center gap-2 bg-white p-2 rounded-xl border border-slate-100">
                             <span className="font-bold text-slate-400 whitespace-nowrap">🕒 최근 출석:</span>
@@ -463,7 +424,6 @@
             </div>
           )}
 
-          {/* ① 운영원칙 / 과목 관리 */}
           {activeTab === 'rules' && !isTeacherMode && (
             <div className="space-y-4 md:space-y-6">
               <form onSubmit={addCourse} className="bg-white p-4 md:p-6 rounded-3xl shadow-sm border border-slate-100 grid grid-cols-1 md:grid-cols-5 gap-3 items-end">
@@ -516,7 +476,6 @@
             </div>
           )}
 
-          {/* ② 수입·지출 장부 */}
           {activeTab === 'ledger' && !isTeacherMode && (
             <div className="space-y-4 md:space-y-6">
               <form onSubmit={addLedger} className="bg-white p-4 md:p-6 rounded-3xl shadow-sm border border-slate-100 grid grid-cols-1 md:grid-cols-5 gap-3 items-end">
@@ -581,7 +540,6 @@
             </div>
           )}
 
-          {/* ③ 교습비 영수증 원부 */}
           {activeTab === 'receipt' && !isTeacherMode && (
             <div className="bg-white p-4 md:p-6 rounded-3xl shadow-sm border border-slate-100">
               <h3 className="font-bold text-slate-900 mb-4 text-base">교습비 수납 영수증 원부</h3>
@@ -606,7 +564,6 @@
             </div>
           )}
 
-          {/* ⑤ 직원 명부 */}
           {activeTab === 'staff' && !isTeacherMode && (
             <div className="space-y-4 md:space-y-6">
               <form onSubmit={addStaff} className="bg-white p-4 md:p-6 rounded-3xl shadow-sm border border-slate-100 grid grid-cols-1 md:grid-cols-5 gap-3 items-end">
