@@ -47,6 +47,13 @@
       const [selectedTeacher, setSelectedTeacher] = useState(urlTeacher || '전체');
       const [expandedStudentId, setExpandedStudentId] = useState(null);
 
+      // 인라인 수정 모드 상태 (학생 및 강사)
+      const [editingStudentId, setEditingStudentId] = useState(null);
+      const [editStudentData, setEditStudentData] = useState({});
+
+      const [editingStaffId, setEditingStaffId] = useState(null);
+      const [editStaffData, setEditStaffData] = useState({});
+
       const [rules, setRules] = useState({
         academyName: "심스드럼실용음악학원",
         regNum: "제 1234호",
@@ -136,6 +143,18 @@
 
       const handleDetailChange = (id, field, value) => {
         if (db) db.ref(`students/${id}`).update({ [field]: value });
+      };
+
+      // 학생 수정 저장
+      const saveStudentEdit = (id) => {
+        if (db) db.ref(`students/${id}`).update(editStudentData);
+        setEditingStudentId(null);
+      };
+
+      // 강사 수정 저장
+      const saveStaffEdit = (id) => {
+        if (db) db.ref(`staff/${id}`).update(editStaffData);
+        setEditingStaffId(null);
       };
 
       const addStudent = (e) => {
@@ -424,13 +443,15 @@
               <div className="bg-white p-4 md:p-6 rounded-3xl shadow-sm border border-slate-100 space-y-4">
                 <div className="flex justify-between items-center">
                   <h3 className="font-bold text-slate-900 text-base">원생 관리 대장 ({filteredStudents.length}명)</h3>
-                  <span className="text-xs text-blue-600 font-medium">💡 학생 이름을 클릭하면 상세 기록이 열립니다</span>
+                  <span className="text-xs text-blue-600 font-medium">💡 학생 이름 클릭 시 상세기록, ✏️ 버튼 클릭 시 정보 수정 가능</span>
                 </div>
 
                 <div className="space-y-3">
                   {filteredStudents.map(s => {
                     const isDone = (s.lessonCount || 0) >= 4;
                     const isExpanded = expandedStudentId === s.id;
+                    const isEditing = editingStudentId === s.id;
+
                     return (
                       <div key={s.id} className={`p-4 rounded-2xl border transition-all ${isDone ? "bg-rose-50/70 border-rose-200" : "bg-slate-50/50 border-slate-100"}`}>
                         <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-3 mb-2">
@@ -439,32 +460,78 @@
                               {s.name ? s.name[0] : '학'}
                             </div>
                             <div>
-                              <div className="flex items-center gap-2 flex-wrap">
-                                <button 
-                                  onClick={() => setExpandedStudentId(isExpanded ? null : s.id)}
-                                  className="font-bold text-slate-900 text-base hover:text-blue-600 transition-colors text-left flex items-center gap-1"
-                                >
-                                  {s.name} <span className="text-xs text-blue-500">▼</span>
-                                </button>
-                                <span className="text-xs bg-slate-200 text-slate-700 px-2 py-0.5 rounded-md font-medium">{s.teacher}</span>
-                                <span className="text-xs bg-indigo-50 text-indigo-700 px-2 py-0.5 rounded-md font-bold">📅 {s.dayOfWeek || '월요일'} {s.timeSlot || '14:00'}</span>
-                                
-                                <div className="flex gap-1.5 items-center">
-                                  <button 
-                                    onClick={() => handleStartLesson(s.id)}
-                                    className="text-xs bg-blue-600 hover:bg-blue-700 text-white px-2.5 py-1 rounded-lg font-bold transition-all"
+                              {isEditing ? (
+                                <div className="flex flex-wrap gap-2 items-center">
+                                  <input 
+                                    type="text" 
+                                    value={editStudentData.name !== undefined ? editStudentData.name : s.name} 
+                                    onChange={e => setEditStudentData({...editStudentData, name: e.target.value})} 
+                                    className="p-1.5 bg-white border rounded-lg text-xs w-24 font-bold"
+                                    placeholder="이름"
+                                  />
+                                  <input 
+                                    type="text" 
+                                    value={editStudentData.phone !== undefined ? editStudentData.phone : s.phone} 
+                                    onChange={e => setEditStudentData({...editStudentData, phone: e.target.value})} 
+                                    className="p-1.5 bg-white border rounded-lg text-xs w-32"
+                                    placeholder="연락처"
+                                  />
+                                  <select 
+                                    value={editStudentData.dayOfWeek !== undefined ? editStudentData.dayOfWeek : s.dayOfWeek} 
+                                    onChange={e => setEditStudentData({...editStudentData, dayOfWeek: e.target.value})}
+                                    className="p-1.5 bg-white border rounded-lg text-xs"
                                   >
-                                    ▶ 수업 시작
-                                  </button>
-                                  <button 
-                                    onClick={() => handleEndLesson(s.id)}
-                                    className="text-xs bg-emerald-600 hover:bg-emerald-700 text-white px-2.5 py-1 rounded-lg font-bold transition-all"
+                                    {daysOfWeek.map(d => <option key={d} value={d}>{d}</option>)}
+                                  </select>
+                                  <select 
+                                    value={editStudentData.timeSlot !== undefined ? editStudentData.timeSlot : s.timeSlot} 
+                                    onChange={e => setEditStudentData({...editStudentData, timeSlot: e.target.value})}
+                                    className="p-1.5 bg-white border rounded-lg text-xs"
                                   >
-                                    ⏹ 수업 종료
-                                  </button>
+                                    {timeSlots.map(t => <option key={t} value={t}>{t}</option>)}
+                                  </select>
+                                  <button onClick={() => saveStudentEdit(s.id)} className="bg-emerald-600 text-white px-3 py-1.5 rounded-lg text-xs font-bold">저장</button>
+                                  <button onClick={() => setEditingStudentId(null)} className="bg-slate-200 text-slate-700 px-2 py-1.5 rounded-lg text-xs">취소</button>
                                 </div>
-                              </div>
-                              <p className="text-xs text-slate-500 mt-0.5">{s.course} | 📞 {s.phone}</p>
+                              ) : (
+                                <>
+                                  <div className="flex items-center gap-2 flex-wrap">
+                                    <button 
+                                      onClick={() => setExpandedStudentId(isExpanded ? null : s.id)}
+                                      className="font-bold text-slate-900 text-base hover:text-blue-600 transition-colors text-left flex items-center gap-1"
+                                    >
+                                      {s.name} <span className="text-xs text-blue-500">▼</span>
+                                    </button>
+                                    <span className="text-xs bg-slate-200 text-slate-700 px-2 py-0.5 rounded-md font-medium">{s.teacher}</span>
+                                    <span className="text-xs bg-indigo-50 text-indigo-700 px-2 py-0.5 rounded-md font-bold">📅 {s.dayOfWeek || '월요일'} {s.timeSlot || '14:00'}</span>
+                                    
+                                    {!isTeacherMode && (
+                                      <button 
+                                        onClick={() => { setEditingStudentId(s.id); setEditStudentData({name: s.name, phone: s.phone, dayOfWeek: s.dayOfWeek || '월요일', timeSlot: s.timeSlot || '14:00'}); }}
+                                        className="text-xs bg-slate-200 hover:bg-slate-300 text-slate-700 px-2 py-0.5 rounded-md font-semibold transition-all"
+                                      >
+                                        ✏️ 수정
+                                      </button>
+                                    )}
+
+                                    <div className="flex gap-1.5 items-center">
+                                      <button 
+                                        onClick={() => handleStartLesson(s.id)}
+                                        className="text-xs bg-blue-600 hover:bg-blue-700 text-white px-2.5 py-1 rounded-lg font-bold transition-all"
+                                      >
+                                        ▶ 수업 시작
+                                      </button>
+                                      <button 
+                                        onClick={() => handleEndLesson(s.id)}
+                                        className="text-xs bg-emerald-600 hover:bg-emerald-700 text-white px-2.5 py-1 rounded-lg font-bold transition-all"
+                                      >
+                                        ⏹ 수업 종료
+                                      </button>
+                                    </div>
+                                  </div>
+                                  <p className="text-xs text-slate-500 mt-0.5">{s.course} | 📞 {s.phone}</p>
+                                </>
+                              )}
                             </div>
                           </div>
 
@@ -706,7 +773,10 @@
               </form>
 
               <div className="bg-white p-4 md:p-6 rounded-3xl shadow-sm border border-slate-100">
-                <h3 className="font-bold text-slate-900 mb-4 text-base">직원/강사 관리 명부 ({staff.length}명)</h3>
+                <div className="flex justify-between items-center mb-4">
+                  <h3 className="font-bold text-slate-900 text-base">직원/강사 관리 명부 ({staff.length}명)</h3>
+                  <span className="text-xs text-blue-600 font-medium">💡 ✏️ 버튼을 눌러 언제든지 수정할 수 있습니다</span>
+                </div>
                 <div className="overflow-x-auto">
                   <table className="w-full text-left text-sm min-w-[500px]">
                     <thead className="bg-slate-50 text-slate-500">
@@ -716,26 +786,84 @@
                         <th className="p-3.5">담당 과목</th>
                         <th className="p-3.5">채용일</th>
                         <th className="p-3.5 text-center">성범죄/아동학대 전력조회</th>
-                        <th className="p-3.5 text-center">삭제</th>
+                        <th className="p-3.5 text-center">수정 / 삭제</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-100">
-                      {staff.map(st => (
-                        <tr key={st.id}>
-                          <td className="p-3.5 font-bold text-slate-800">{st.name}</td>
-                          <td className="p-3.5 text-slate-600">{st.role}</td>
-                          <td className="p-3.5 text-slate-600">{st.subject}</td>
-                          <td className="p-3.5 text-slate-600">{st.hireDate}</td>
-                          <td className="p-3.5 text-center">
-                            {st.checkCrime && st.checkSex ? (
-                              <span className="bg-emerald-50 text-emerald-600 text-xs px-2.5 py-1 rounded-full font-semibold">회신 완료</span>
-                            ) : (
-                              <span className="bg-rose-50 text-rose-600 text-xs px-2.5 py-1 rounded-full font-semibold">미완료</span>
-                            )}
-                          </td>
-                          <td className="p-3.5 text-center"><button onClick={() => deleteStaff(st.id)} className="text-slate-400 hover:text-rose-500">삭제</button></td>
-                        </tr>
-                      ))}
+                      {staff.map(st => {
+                        const isEditing = editingStaffId === st.id;
+                        return (
+                          <tr key={st.id}>
+                            <td className="p-3.5 font-bold text-slate-800">
+                              {isEditing ? (
+                                <input 
+                                  type="text" 
+                                  value={editStaffData.name !== undefined ? editStaffData.name : st.name} 
+                                  onChange={e => setEditStaffData({...editStaffData, name: e.target.value})} 
+                                  className="p-1 bg-white border rounded text-xs w-24 font-bold"
+                                />
+                              ) : st.name}
+                            </td>
+                            <td className="p-3.5 text-slate-600">
+                              {isEditing ? (
+                                <input 
+                                  type="text" 
+                                  value={editStaffData.role !== undefined ? editStaffData.role : st.role} 
+                                  onChange={e => setEditStaffData({...editStaffData, role: e.target.value})} 
+                                  className="p-1 bg-white border rounded text-xs w-20"
+                                />
+                              ) : st.role}
+                            </td>
+                            <td className="p-3.5 text-slate-600">
+                              {isEditing ? (
+                                <input 
+                                  type="text" 
+                                  value={editStaffData.subject !== undefined ? editStaffData.subject : st.subject} 
+                                  onChange={e => setEditStaffData({...editStaffData, subject: e.target.value})} 
+                                  className="p-1 bg-white border rounded text-xs w-24"
+                                />
+                              ) : st.subject}
+                            </td>
+                            <td className="p-3.5 text-slate-600">
+                              {isEditing ? (
+                                <input 
+                                  type="date" 
+                                  value={editStaffData.hireDate !== undefined ? editStaffData.hireDate : st.hireDate} 
+                                  onChange={e => setEditStaffData({...editStaffData, hireDate: e.target.value})} 
+                                  className="p-1 bg-white border rounded text-xs"
+                                />
+                              ) : st.hireDate}
+                            </td>
+                            <td className="p-3.5 text-center">
+                              {isEditing ? (
+                                <div className="flex gap-2 justify-center text-xs">
+                                  <label><input type="checkbox" checked={editStaffData.checkCrime !== undefined ? editStaffData.checkCrime : st.checkCrime} onChange={e => setEditStaffData({...editStaffData, checkCrime: e.target.checked})} /> 범죄</label>
+                                  <label><input type="checkbox" checked={editStaffData.checkSex !== undefined ? editStaffData.checkSex : st.checkSex} onChange={e => setEditStaffData({...editStaffData, checkSex: e.target.checked})} /> 성범죄</label>
+                                </div>
+                              ) : (
+                                st.checkCrime && st.checkSex ? (
+                                  <span className="bg-emerald-50 text-emerald-600 text-xs px-2.5 py-1 rounded-full font-semibold">회신 완료</span>
+                                ) : (
+                                  <span className="bg-rose-50 text-rose-600 text-xs px-2.5 py-1 rounded-full font-semibold">미완료</span>
+                                )
+                              )}
+                            </td>
+                            <td className="p-3.5 text-center space-x-1">
+                              {isEditing ? (
+                                <>
+                                  <button onClick={() => saveStaffEdit(st.id)} className="bg-emerald-600 text-white px-2 py-1 rounded text-xs font-bold">저장</button>
+                                  <button onClick={() => setEditingStaffId(null)} className="bg-slate-200 text-slate-700 px-2 py-1 rounded text-xs">취소</button>
+                                </>
+                              ) : (
+                                <>
+                                  <button onClick={() => { setEditingStaffId(st.id); setEditStaffData({name: st.name, role: st.role, subject: st.subject, hireDate: st.hireDate, checkCrime: st.checkCrime, checkSex: st.checkSex}); }} className="bg-slate-100 hover:bg-slate-200 text-slate-700 px-2.5 py-1 rounded text-xs font-semibold">✏️ 수정</button>
+                                  <button onClick={() => deleteStaff(st.id)} className="text-slate-400 hover:text-rose-500 text-xs">삭제</button>
+                                </>
+                              )}
+                            </td>
+                          </tr>
+                        );
+                      })}
                     </tbody>
                   </table>
                 </div>
