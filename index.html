@@ -19,7 +19,6 @@
   <script type="text/babel">
     const { useState, useEffect } = React;
 
-    // 🔴 원장님의 Firebase 클라우드 데이터베이스 키 완벽 연동
     const firebaseConfig = {
       apiKey: "AIzaSyArl8_qT9eUfofH9IgK41xtdSPc2DwoB6g",
       authDomain: "simsdrum-33e61.firebaseapp.com",
@@ -46,7 +45,7 @@
 
       const [activeTab, setActiveTab] = useState('students');
       const [selectedTeacher, setSelectedTeacher] = useState(urlTeacher || '전체');
-      const [expandedStudentId, setExpandedStudentId] = useState(null); // 아코디언 토글용
+      const [expandedStudentId, setExpandedStudentId] = useState(null);
 
       const [rules, setRules] = useState({
         academyName: "심스드럼실용음악학원",
@@ -99,7 +98,6 @@
         return () => { stRef.off(); lgRef.off(); sfRef.off(); rlRef.off(); };
       }, []);
 
-      // 수업 시작 시간 기록 및 1회 차감
       const handleStartLesson = (id) => {
         const now = new Date();
         const dateStr = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-${String(now.getDate()).padStart(2,'0')}`;
@@ -119,11 +117,9 @@
         if (db) db.ref(`students/${id}`).update(updateData);
       };
 
-      // 수업 종료 시간 기록
       const handleEndLesson = (id) => {
         const now = new Date();
         const timeStr = `${String(now.getHours()).padStart(2,'0')}:${String(now.getMinutes()).padStart(2,'0')}`;
-        
         if (db) db.ref(`students/${id}`).update({ endTime: timeStr });
       };
 
@@ -367,7 +363,6 @@
                             </div>
                             <div>
                               <div className="flex items-center gap-2 flex-wrap">
-                                <!-- 학생 이름 클릭 시 상세 열림/닫힘 -->
                                 <button 
                                   onClick={() => setExpandedStudentId(isExpanded ? null : s.id)}
                                   className="font-bold text-slate-900 text-base hover:text-blue-600 transition-colors text-left flex items-center gap-1"
@@ -421,9 +416,8 @@
                           </div>
                         </div>
 
-                        {/* 클릭 시 펼쳐지는 상세 정보 영역 (날짜, 수업시작, 수업종료, 내용, 비고) */}
                         {isExpanded && (
-                          <div className="mt-3 pt-3 border-t border-slate-200/80 bg-white p-4 rounded-2xl shadow-inner space-y-3 animate-fadeIn">
+                          <div className="mt-3 pt-3 border-t border-slate-200/80 bg-white p-4 rounded-2xl shadow-inner space-y-3">
                             <div className="grid grid-cols-1 md:grid-cols-3 gap-3 text-xs">
                               <div className="bg-slate-50 p-2.5 rounded-xl border border-slate-100 flex items-center justify-between">
                                 <span className="font-bold text-slate-400">📅 수업 날짜:</span>
