@@ -326,73 +326,117 @@
 
         const reader = new FileReader();
 
+        // 파일 형식에 따라 읽기 방식 분기 (xlsx는 ArrayBuffer, 원본 xls는 Text)
+        if (file.name.endsWith('.xlsx') || file.name.endsWith('.csv')) {
+          reader.readAsArrayBuffer(file);
+        } else {
+          reader.readAsText(file, 'euc-kr');
+        }
+
         reader.onload = (evt) => {
           try {
-            const htmlText = evt.target.result;
-            
-            const parser = new DOMParser();
-            const doc = parser.parseFromString(htmlText, 'text/html');
-            const rows = doc.querySelectorAll('tr');
+            const fileData = evt.target.result;
+            let rowsData = [];
 
-            if (!rows || rows.length === 0) {
-              alert("엑셀 파일에서 데이터를 읽지 못했습니다.");
-              return;
-            }
+            // 1. 정제된 .xlsx 파일인 경우
+            if (file.name.endsWith('.xlsx') || file.name.endsWith('.csv')) {
+              const workbook = XLSX.read(fileData, { type: 'array', cellDates: true });
+              const sheetName = workbook.SheetNames[0];
+              rowsData = XLSX.utils.sheet_to_json(workbook.Sheets[sheetName], { header: 1, defval: "" });
 
-            let importedCount = 0;
+              let importedCount = 0;
+              rowsData.forEach((row, idx) => {
+                if (idx === 0 || !row || row.length < 5) return; // 헤더 제외
 
-            rows.forEach((row, idx) => {
-              const cols = Array.from(row.querySelectorAll('td, th')).map(td => td.textContent.trim());
-              
-              // 첫 번째 열이 숫자인 실제 거래 데이터 행만 추출
-              if (cols.length < 8 || !/^[0-9]+$/.test(cols[0])) return;
+                const dateRaw = String(row[1] || '').trim();
+                const dateMatch = dateRaw.match(/\d{4}[\/.-]\d{1,2}[\/.-]\d{1,2}/);
+                if (!dateMatch) return;
+                const date = dateMatch[0].replace(/\./g, "-").replace(/\//g, "-");
 
-              const dateRaw = cols[1] || '';
-              const dateMatch = dateRaw.match(/\d{4}[\/.-]\d{1,2}[\/.-]\d{1,2}/);
-              if (!dateMatch) return;
+                const deposit = Number(String(row[3] || '').replace(/[^0-9]/g, '')) || 0;
+                if (deposit === 0) return;
 
-              const date = dateMatch[0].replace(/\./g, "-").replace(/\//g, "-");
+                const cardCompany = String(row[2] || '카드').trim();
+                const content = String(row[4] || '').trim();
+                const memo = String(row[5] || '').trim();
 
-              // 출금금액(2번 열), 입금금액(3번 열)
-              const withdrawal = Number((cols[2] || '').replace(/[^0-9]/g, '')) || 0;
-              const deposit = Number((cols[3] || '').replace(/[^0-9]/g, '')) || 0;
+                const id = String(Date.now()) + "_" + idx + "_" + Math.floor(Math.random() * 1000);
+                const item = {
+                  id,
+                  date,
+                  deposit,
+                  withdrawal: 0,
+                  method: "카드",
+                  note: `[${cardCompany}] ${content} ${memo}`.trim()
+                };
 
-              // 금액이 모두 0이면 패스
-              if (withdrawal === 0 && deposit === 0) return;
+                if (db) {
+                  db.ref(`ledger/${id}`).set(item);
+                }
+                importedCount++;
+              });
 
-              const content = cols[5] || '';
-              const memo = cols[6] || '';
-              const branch = cols[7] || '';
-              
-              const fullText = `${content} ${memo} ${branch}`;
+              alert(`성공! 정제된 파일에서 총 ${importedCount}건의 내역이 회계 장부에 등록되었습니다.`);
 
-              let method = "카드";
-              if (fullText.includes("현금")) method = "현금";
-              else if (fullText.includes("이체") || fullText.includes("타행")) method = "계좌이체";
-
-              const id = String(Date.now()) + "_" + idx + "_" + Math.floor(Math.random() * 1000);
-              const noteText = [content, memo].filter(Boolean).join(" / ") || "거래내역";
-
-              const item = {
-                id,
-                date,
-                deposit,
-                withdrawal,
-                method,
-                note: `[은행연동] ${noteText}`
-              };
-
-              // Firebase 장부에 저장
-              if (db) {
-                db.ref(`ledger/${id}`).set(item);
-              }
-              importedCount++;
-            });
-
-            if (importedCount > 0) {
-              alert(`성공! 총 ${importedCount}건의 거래 내역이 회계 장부에 등록되었습니다.`);
             } else {
-              alert("등록할 수 있는 유효한 거래 내역을 찾지 못했습니다.");
+              // 2. 농협 원본 .xls (HTML) 파일인 경우
+              const parser = new DOMParser();
+              const doc = parser.parseFromString(fileData, 'text/html');
+              const rows = doc.querySelectorAll('tr');
+
+              if (!rows || rows.length === 0) {
+                alert("엑셀 파일에서 데이터를 읽지 못했습니다.");
+                return;
+              }
+
+              let importedCount = 0;
+              const CARD_KEYWORDS = ["NH168", "KB110", "롯데", "삼성카드", "SHC", "현1631", "우6011", "가맹점", "카드"];
+
+              rows.forEach((row, idx) => {
+                const cols = Array.from(row.querySelectorAll('td, th')).map(td => td.textContent.trim());
+                if (cols.length < 8 || !/^[0-9]+$/.test(cols[0])) return;
+
+                const dateRaw = cols[1] || '';
+                const dateMatch = dateRaw.match(/\d{4}[\/.-]\d{1,2}[\/.-]\d{1,2}/);
+                if (!dateMatch) return;
+                const date = dateMatch[0].replace(/\./g, "-").replace(/\//g, "-");
+
+                const withdrawal = Number((cols[2] || '').replace(/[^0-9]/g, '')) || 0;
+                const deposit = Number((cols[3] || '').replace(/[^0-9]/g, '')) || 0;
+
+                if (withdrawal === 0 && deposit === 0) return;
+
+                const content = cols[5] || '';
+                const memo = cols[6] || '';
+                const branch = cols[7] || '';
+                const fullText = `${content} ${memo} ${branch}`;
+
+                const isCardTx = CARD_KEYWORDS.some(keyword => fullText.includes(keyword));
+                if (!isCardTx) return;
+
+                let method = "카드";
+                if (fullText.includes("현금")) method = "현금";
+                else if (fullText.includes("이체")) method = "계좌이체";
+
+                const id = String(Date.now()) + "_" + idx + "_" + Math.floor(Math.random() * 1000);
+                const noteText = [content, memo].filter(Boolean).join(" / ") || "카드매입거래";
+
+                const item = {
+                  id,
+                  date,
+                  deposit,
+                  withdrawal,
+                  method,
+                  note: `[카드매입] ${noteText}`
+                };
+
+                if (db) {
+                  db.ref(`ledger/${id}`).set(item);
+                }
+                importedCount++;
+              });
+
+              alert(`성공! 농협 원본 파일에서 카드 매입 내역 총 ${importedCount}건이 등록되었습니다.`);
             }
 
             e.target.value = "";
@@ -401,8 +445,6 @@
             alert("처리 중 오류 발생: " + err.message);
           }
         };
-
-        reader.readAsText(file, 'euc-kr');
       };
 
       const addStaff = (e) => {
