@@ -106,36 +106,36 @@
             list = Object.keys(data).map(k => ({ id: k, ...data[k] }));
           }
 
-          // 자동 월세 고정지출 생성 (매월 1일, 19일 55만원)
-          // 기존 장부와 겹치지 않게 가상 생성 혹은 기본 포함 처리
+          // 자동 월세 고정지출 생성 (매월 1일, 19일 55만원 - 당일 혹은 지난 날짜만 반영)
           const existingDates = new Set(list.map(l => `${l.date}_${l.withdrawal}_${l.note}`));
           
-          // 2025년 9월부터 현재 연도 연말까지 자동 월세 생성 주입
           const startDate = new Date(2025, 8, 1); // 2025-09-01
-          const endDate = new Date(2028, 11, 31);
+          const today = new Date(); // 오늘 날짜
           let curr = new Date(startDate);
 
-          while (curr <= endDate) {
+          while (curr <= today) {
             const y = curr.getFullYear();
             const m = String(curr.getMonth() + 1).padStart(2, '0');
             
             [1, 19].forEach(day => {
-              const dStr = `${y}-${m}-${String(day).padStart(2, '0')}`;
-              const noteStr = "월세 고정지출";
-              const keyCheck = `${dStr}_550000_${noteStr}`;
+              const rentDateObj = new Date(y, curr.getMonth(), day);
+              // 오늘 날짜와 같거나 이전인 경우에만 자동 생성
+              if (rentDateObj <= today) {
+                const dStr = `${y}-${m}-${String(day).padStart(2, '0')}`;
+                const noteStr = "월세 고정지출";
+                const keyCheck = `${dStr}_550000_${noteStr}`;
 
-              // 사용자가 직접 지우거나 하지 않았다면 가상 항목으로 추가
-              if (!existingDates.has(keyCheck)) {
-                // 아직 미래 날짜가 아닐 경우 또는 전체 기간에 대해 포함
-                list.push({
-                  id: `auto_rent_${y}_${m}_${day}`,
-                  date: dStr,
-                  deposit: 0,
-                  withdrawal: 550000,
-                  method: "계좌이체",
-                  note: "월세 고정지출 (자동)",
-                  isAutoRent: true
-                });
+                if (!existingDates.has(keyCheck)) {
+                  list.push({
+                    id: `auto_rent_${y}_${m}_${day}`,
+                    date: dStr,
+                    deposit: 0,
+                    withdrawal: 550000,
+                    method: "계좌이체",
+                    note: "월세 고정지출 (자동)",
+                    isAutoRent: true
+                  });
+                }
               }
             });
 
@@ -336,7 +336,6 @@
 
       const deleteLedger = (item) => {
         if (item.isAutoRent) {
-          // 자동 생성된 월세를 DB에 실제로 등록하여 숨기거나 삭제 처리
           if (confirm(`${item.date} 월세 지출 건을 장부에서 제외(삭제)하시겠습니까?`)) {
             if (db) db.ref(`ledger/${item.id}`).set({ deleted: true, ...item });
           }
@@ -547,7 +546,6 @@
         return `${baseUrl}?teacher=${encodeURIComponent(tName)}`;
       };
 
-      // 월별 집계 데이터 계산 함수 (삭제된 항목 제외)
       const getMonthlySummary = () => {
         const summary = {};
         ledger.filter(item => !item.deleted).forEach(item => {
@@ -1023,10 +1021,9 @@
 
           {activeTab === 'ledger' && !isTeacherMode && (
             <div className="space-y-4">
-              {/* 월별 토탈 집계 요약 카드 영역 (월세 고정지출 자동 반영) */}
               <div className="bg-white p-4 rounded-2xl shadow-sm border border-slate-100 space-y-3">
                 <h3 className="font-bold text-slate-900 text-sm flex items-center gap-1.5">
-                  📊 월별 토탈 금액 집계 (수입/지출/순수익 - 월세 매월 1일, 19일 55만 원 자동반영)
+                  📊 월별 토탈 금액 집계 (수입/지출/순수익 - 당일 및 지난 월세만 자동반영)
                 </h3>
                 <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-2.5">
                   {monthlySummary.map(m => {
@@ -1092,7 +1089,7 @@
 
               <div className="bg-white p-4 rounded-2xl shadow-sm border border-slate-100 space-y-3">
                 <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-2">
-                  <h3 className="font-bold text-slate-900 text-sm">회계 장부 내역 ({activeLedgerList.length}건 - 월세 고정지출 자동 반영됨)</h3>
+                  <h3 className="font-bold text-slate-900 text-sm">회계 장부 내역 ({activeLedgerList.length}건)</h3>
                   <div className="flex gap-2">
                     <button 
                       onClick={handleDeleteSelectedLedger}
@@ -1179,7 +1176,7 @@
                               ) : (
                                 <>
                                   <button onClick={() => { setEditingLedgerId(item.id); setEditLedgerData({ date: item.date, deposit: item.deposit || 0, withdrawal: item.withdrawal || 0, method: item.method, note: item.note }); }} className="bg-slate-100 hover:bg-slate-200 text-slate-700 px-2 py-1 rounded text-[11px]">✏️ 수정</button>
-                                  <button onClick={() => deleteLedger(item.id)} className="text-slate-400 hover:text-rose-500 text-[11px]">삭제</button>
+                                  <button onClick={() => deleteLedger(item)} className="text-slate-400 hover:text-rose-500 text-[11px]">삭제</button>
                                 </>
                               )}
                             </td>
@@ -1322,7 +1319,7 @@
       );
     }
 
-    ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+    ReactDOM.createRoot(getElementById('root')).render(<App />);
   </script>
 </body>
 </html>
