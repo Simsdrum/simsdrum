@@ -46,6 +46,7 @@
 
       const [activeTab, setActiveTab] = useState('students');
       const [selectedTeacher, setSelectedTeacher] = useState(urlTeacher || '전체');
+      const [expandedStudentId, setExpandedStudentId] = useState(null); // 아코디언 토글용
 
       const [rules, setRules] = useState({
         academyName: "심스드럼실용음악학원",
@@ -60,13 +61,11 @@
       const [ledger, setLedger] = useState([]);
       const [staff, setStaff] = useState([]);
 
-      // 입력 폼 State
       const [newCourse, setNewCourse] = useState({ teacher: "", name: "", fee: "", hours: "4회 / 회당 50분" });
       const [newStudent, setNewStudent] = useState({ name: "", birth: "", phone: "", course: "" });
       const [newLedger, setNewLedger] = useState({ date: new Date().toISOString().split('T')[0], type: "수입", amount: "", method: "카드", note: "" });
       const [newStaff, setNewStaff] = useState({ name: "", role: "강사", subject: "드럼", hireDate: new Date().toISOString().split('T')[0], checkCrime: true, checkSex: true });
 
-      // Firebase 실시간 동기화
       useEffect(() => {
         if (!db) return;
 
@@ -100,18 +99,32 @@
         return () => { stRef.off(); lgRef.off(); sfRef.off(); rlRef.off(); };
       }, []);
 
-      // 수업 시작 (현재시간 체크 및 1회 차감 + 실시간 세이브)
+      // 수업 시작 시간 기록 및 1회 차감
       const handleStartLesson = (id) => {
         const now = new Date();
-        const timeStr = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-${String(now.getDate()).padStart(2,'0')} ${String(now.getHours()).padStart(2,'0')}:${String(now.getMinutes()).padStart(2,'0')}`;
+        const dateStr = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-${String(now.getDate()).padStart(2,'0')}`;
+        const timeStr = `${String(now.getHours()).padStart(2,'0')}:${String(now.getMinutes()).padStart(2,'0')}`;
         
         const target = students.find(s => s.id === id);
         if (!target) return;
 
         const nextCount = Math.min(4, (target.lessonCount || 0) + 1);
-        const updateData = { lessonCount: nextCount, lastAttendance: timeStr };
+        const updateData = { 
+          lessonCount: nextCount, 
+          lastAttendanceDate: dateStr,
+          startTime: timeStr,
+          endTime: target.endTime || '-'
+        };
 
         if (db) db.ref(`students/${id}`).update(updateData);
+      };
+
+      // 수업 종료 시간 기록
+      const handleEndLesson = (id) => {
+        const now = new Date();
+        const timeStr = `${String(now.getHours()).padStart(2,'0')}:${String(now.getMinutes()).padStart(2,'0')}`;
+        
+        if (db) db.ref(`students/${id}`).update({ endTime: timeStr });
       };
 
       const updateLessonCount = (id, delta) => {
@@ -122,7 +135,7 @@
       };
 
       const resetLessonCount = (id) => {
-        if (db) db.ref(`students/${id}`).update({ lessonCount: 0 });
+        if (db) db.ref(`students/${id}`).update({ lessonCount: 0, startTime: '-', endTime: '-' });
       };
 
       const handleDetailChange = (id, field, value) => {
@@ -142,7 +155,9 @@
           course: newStudent.course || (selectedObj ? selectedObj.name : ''),
           teacher: selectedObj ? selectedObj.teacher : "담당 미정",
           lessonCount: 0,
-          lastAttendance: "-",
+          lastAttendanceDate: '-',
+          startTime: '-',
+          endTime: '-',
           lessonNote: "",
           note: ""
         };
@@ -336,29 +351,45 @@
               <div className="bg-white p-4 md:p-6 rounded-3xl shadow-sm border border-slate-100 space-y-4">
                 <div className="flex justify-between items-center">
                   <h3 className="font-bold text-slate-900 text-base">원생 관리 대장 ({filteredStudents.length}명)</h3>
-                  <span className="text-xs text-blue-600 font-medium">💡 클릭 시 실시간 자동 저장됩니다</span>
+                  <span className="text-xs text-blue-600 font-medium">💡 학생 이름을 클릭하면 상세 기록(날짜·시간·내용·비고)이 열립니다</span>
                 </div>
 
                 <div className="space-y-3">
                   {filteredStudents.map(s => {
                     const isDone = (s.lessonCount || 0) >= 4;
+                    const isExpanded = expandedStudentId === s.id;
                     return (
                       <div key={s.id} className={`p-4 rounded-2xl border transition-all ${isDone ? "bg-rose-50/70 border-rose-200" : "bg-slate-50/50 border-slate-100"}`}>
-                        <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-3 mb-3">
+                        <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-3 mb-2">
                           <div className="flex items-center gap-3">
                             <div className="w-10 h-10 rounded-full bg-blue-100 text-blue-600 flex items-center justify-center font-bold text-base">
                               {s.name ? s.name[0] : '학'}
                             </div>
                             <div>
-                              <div className="flex items-center gap-2">
-                                <span className="font-bold text-slate-900 text-base">{s.name}</span>
-                                <span className="text-xs bg-slate-200 text-slate-700 px-2 py-0.5 rounded-md font-medium">{s.teacher}</span>
+                              <div className="flex items-center gap-2 flex-wrap">
+                                <!-- 학생 이름 클릭 시 상세 열림/닫힘 -->
                                 <button 
-                                  onClick={() => handleStartLesson(s.id)}
-                                  className="text-xs bg-blue-600 hover:bg-blue-700 text-white px-2.5 py-1 rounded-lg font-bold transition-all"
+                                  onClick={() => setExpandedStudentId(isExpanded ? null : s.id)}
+                                  className="font-bold text-slate-900 text-base hover:text-blue-600 transition-colors text-left flex items-center gap-1"
                                 >
-                                  ▶ 수업 시작 (시간 연동)
+                                  {s.name} <span className="text-xs text-blue-500">▼</span>
                                 </button>
+                                <span className="text-xs bg-slate-200 text-slate-700 px-2 py-0.5 rounded-md font-medium">{s.teacher}</span>
+                                
+                                <div className="flex gap-1.5 items-center">
+                                  <button 
+                                    onClick={() => handleStartLesson(s.id)}
+                                    className="text-xs bg-blue-600 hover:bg-blue-700 text-white px-2.5 py-1 rounded-lg font-bold transition-all"
+                                  >
+                                    ▶ 수업 시작
+                                  </button>
+                                  <button 
+                                    onClick={() => handleEndLesson(s.id)}
+                                    className="text-xs bg-emerald-600 hover:bg-emerald-700 text-white px-2.5 py-1 rounded-lg font-bold transition-all"
+                                  >
+                                    ⏹ 수업 종료
+                                  </button>
+                                </div>
                               </div>
                               <p className="text-xs text-slate-500 mt-0.5">{s.course} | 📞 {s.phone}</p>
                             </div>
@@ -390,32 +421,48 @@
                           </div>
                         </div>
 
-                        <div className="grid grid-cols-1 md:grid-cols-3 gap-2 pt-2 border-t border-slate-200/60 text-xs">
-                          <div className="flex items-center gap-2 bg-white p-2 rounded-xl border border-slate-100">
-                            <span className="font-bold text-slate-400 whitespace-nowrap">🕒 최근 출석:</span>
-                            <span className="font-semibold text-blue-600">{s.lastAttendance || '기록 없음'}</span>
+                        {/* 클릭 시 펼쳐지는 상세 정보 영역 (날짜, 수업시작, 수업종료, 내용, 비고) */}
+                        {isExpanded && (
+                          <div className="mt-3 pt-3 border-t border-slate-200/80 bg-white p-4 rounded-2xl shadow-inner space-y-3 animate-fadeIn">
+                            <div className="grid grid-cols-1 md:grid-cols-3 gap-3 text-xs">
+                              <div className="bg-slate-50 p-2.5 rounded-xl border border-slate-100 flex items-center justify-between">
+                                <span className="font-bold text-slate-400">📅 수업 날짜:</span>
+                                <span className="font-semibold text-slate-800">{s.lastAttendanceDate || '기록 없음'}</span>
+                              </div>
+                              <div className="bg-slate-50 p-2.5 rounded-xl border border-slate-100 flex items-center justify-between">
+                                <span className="font-bold text-slate-400">🕒 수업 시작:</span>
+                                <span className="font-semibold text-blue-600">{s.startTime || '-'}</span>
+                              </div>
+                              <div className="bg-slate-50 p-2.5 rounded-xl border border-slate-100 flex items-center justify-between">
+                                <span className="font-bold text-slate-400">⏹ 수업 종료:</span>
+                                <span className="font-semibold text-emerald-600">{s.endTime || '-'}</span>
+                              </div>
+                            </div>
+
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-xs">
+                              <div className="space-y-1">
+                                <label className="font-bold text-slate-500 block">📝 수업 내용 (진도):</label>
+                                <input 
+                                  type="text" 
+                                  placeholder="오늘 진도 내용을 입력하세요..." 
+                                  value={s.lessonNote || ''} 
+                                  onChange={(e) => handleDetailChange(s.id, 'lessonNote', e.target.value)}
+                                  className="w-full p-2.5 bg-slate-50 rounded-xl border border-slate-200 text-slate-800 font-medium focus:bg-white focus:border-blue-500 focus:outline-none"
+                                />
+                              </div>
+                              <div className="space-y-1">
+                                <label className="font-bold text-slate-500 block">📌 비고 (특이사항):</label>
+                                <input 
+                                  type="text" 
+                                  placeholder="특이사항을 입력하세요..." 
+                                  value={s.note || ''} 
+                                  onChange={(e) => handleDetailChange(s.id, 'note', e.target.value)}
+                                  className="w-full p-2.5 bg-slate-50 rounded-xl border border-slate-200 text-slate-800 font-medium focus:bg-white focus:border-blue-500 focus:outline-none"
+                                />
+                              </div>
+                            </div>
                           </div>
-                          <div className="flex items-center gap-2 bg-white p-2 rounded-xl border border-slate-100">
-                            <span className="font-bold text-slate-400 whitespace-nowrap">📝 수업 메모:</span>
-                            <input 
-                              type="text" 
-                              placeholder="오늘 진도 내용..." 
-                              value={s.lessonNote || ''} 
-                              onChange={(e) => handleDetailChange(s.id, 'lessonNote', e.target.value)}
-                              className="w-full bg-transparent border-0 focus:outline-none text-slate-800 font-medium"
-                            />
-                          </div>
-                          <div className="flex items-center gap-2 bg-white p-2 rounded-xl border border-slate-100">
-                            <span className="font-bold text-slate-400 whitespace-nowrap">📌 비고(특이사항):</span>
-                            <input 
-                              type="text" 
-                              placeholder="특이사항..." 
-                              value={s.note || ''} 
-                              onChange={(e) => handleDetailChange(s.id, 'note', e.target.value)}
-                              className="w-full bg-transparent border-0 focus:outline-none text-slate-800 font-medium"
-                            />
-                          </div>
-                        </div>
+                        )}
                       </div>
                     );
                   })}
