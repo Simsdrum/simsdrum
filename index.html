@@ -330,7 +330,7 @@
                   <h3 className="font-bold text-slate-900 text-lg">
                     {isTeacherMode ? `👨‍🏫 ${urlTeacher} 선생님 주간 시간표` : "📅 전체 강사 주간 시간표"}
                   </h3>
-                  <p className="text-xs text-slate-500 mt-0.5">요일별·시간대별로 배정된 수강생 스케줄을 한눈에 관리하세요.</p>
+                  <p className="text-xs text-slate-500 mt-0.5">요일별·시간대별로 배정된 수강생 스케줄을 한눈에 관리하세요. (이름 클릭 시 수강생 대장으로 이동)</p>
                 </div>
                 {!isTeacherMode && (
                   <div className="flex gap-2">
@@ -368,7 +368,16 @@
                                       <span className="font-bold bg-blue-100 text-blue-700 px-1.5 py-0.5 rounded">{s.timeSlot || '시간미정'}</span>
                                       <span className="text-xs font-bold text-slate-500">{s.lessonCount || 0}/4회</span>
                                     </div>
-                                    <div className="font-bold text-sm truncate">{s.name}</div>
+                                    <button 
+                                      onClick={() => {
+                                        setActiveTab('students');
+                                        setExpandedStudentId(s.id);
+                                      }}
+                                      className="font-bold text-sm truncate hover:text-blue-600 hover:underline text-left block w-full transition-all"
+                                      title="클릭 시 수강생 대장으로 이동"
+                                    >
+                                      {s.name} ➡️
+                                    </button>
                                     <div className="text-[11px] text-slate-500 truncate">{s.course}</div>
                                     {!isTeacherMode && <div className="text-[10px] text-indigo-600 font-semibold">담당: {s.teacher}</div>}
                                   </div>
