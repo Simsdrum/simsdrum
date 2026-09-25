@@ -43,7 +43,7 @@
       const urlTeacher = urlParams.get('teacher');
       const isTeacherMode = !!urlTeacher;
 
-      const [activeTab, setActiveTab] = useState('students');
+      const [activeTab, setActiveTab] = useState(isTeacherMode ? 'timetable' : 'students');
       const [selectedTeacher, setSelectedTeacher] = useState(urlTeacher || '전체');
       const [expandedStudentId, setExpandedStudentId] = useState(null);
 
@@ -61,7 +61,7 @@
       const [staff, setStaff] = useState([]);
 
       const [newCourse, setNewCourse] = useState({ teacher: "", name: "", fee: "", hours: "4회 / 회당 50분" });
-      const [newStudent, setNewStudent] = useState({ name: "", birth: "", phone: "", course: "" });
+      const [newStudent, setNewStudent] = useState({ name: "", birth: "", phone: "", course: "", dayOfWeek: "월요일", timeSlot: "14:00" });
       const [newLedger, setNewLedger] = useState({ date: new Date().toISOString().split('T')[0], type: "수입", amount: "", method: "카드", note: "" });
       const [newStaff, setNewStaff] = useState({ name: "", role: "강사", subject: "드럼", hireDate: new Date().toISOString().split('T')[0], checkCrime: true, checkSex: true });
 
@@ -150,6 +150,8 @@
           phone: newStudent.phone,
           course: newStudent.course || (selectedObj ? selectedObj.name : ''),
           teacher: selectedObj ? selectedObj.teacher : "담당 미정",
+          dayOfWeek: newStudent.dayOfWeek || "월요일",
+          timeSlot: newStudent.timeSlot || "14:00",
           lessonCount: 0,
           lastAttendanceDate: '-',
           startTime: '-',
@@ -158,7 +160,7 @@
           note: ""
         };
         if (db) db.ref(`students/${id}`).set(newObj);
-        setNewStudent({ name: "", birth: "", phone: "", course: "" });
+        setNewStudent({ name: "", birth: "", phone: "", course: "", dayOfWeek: "월요일", timeSlot: "14:00" });
       };
 
       const deleteStudent = (id) => {
@@ -254,6 +256,9 @@
         return `${baseUrl}?teacher=${encodeURIComponent(tName)}`;
       };
 
+      const daysOfWeek = ["월요일", "화요일", "수요일", "목요일", "금요일", "토요일", "일요일"];
+      const timeSlots = ["10:00", "11:00", "13:00", "14:00", "15:00", "16:00", "17:00", "18:00", "19:00", "20:00", "21:00"];
+
       return (
         <div className="max-w-6xl mx-auto space-y-4 md:space-y-6">
           <header className="flex flex-col md:flex-row justify-between items-start md:items-center bg-white p-5 rounded-3xl shadow-sm border border-slate-100 gap-3">
@@ -276,27 +281,92 @@
             )}
           </header>
 
-          {!isTeacherMode && (
-            <div className="flex md:grid md:grid-cols-5 gap-2 overflow-x-auto pb-1 md:pb-0">
-              {[
-                { id: 'students', label: '④ 수강생 대장 (4회)' },
-                { id: 'rules', label: '① 운영원칙 / 과목' },
-                { id: 'ledger', label: '② 수입·지출 장부' },
-                { id: 'receipt', label: '③ 교습비 영수증' },
-                { id: 'staff', label: '⑤ 직원 명부' },
-              ].map(tab => (
-                <button
-                  key={tab.id}
-                  onClick={() => setActiveTab(tab.id)}
-                  className={`whitespace-nowrap md:whitespace-normal px-4 py-3 md:p-4 rounded-2xl font-semibold text-xs md:text-sm transition-all ${activeTab === tab.id ? 'bg-blue-600 text-white shadow-md' : 'bg-white text-slate-600 border border-slate-100 hover:bg-slate-100'}`}
-                >
-                  {tab.label}
-                </button>
-              ))}
+          <div className="flex md:grid md:grid-cols-6 gap-2 overflow-x-auto pb-1 md:pb-0">
+            <button
+              onClick={() => setActiveTab('timetable')}
+              className={`whitespace-nowrap px-4 py-3 md:p-4 rounded-2xl font-semibold text-xs md:text-sm transition-all ${activeTab === 'timetable' ? 'bg-blue-600 text-white shadow-md' : 'bg-white text-slate-600 border border-slate-100 hover:bg-slate-100'}`}
+            >
+              📅 {isTeacherMode ? '나의 시간표' : '전체 시간표'}
+            </button>
+            <button
+              onClick={() => setActiveTab('students')}
+              className={`whitespace-nowrap px-4 py-3 md:p-4 rounded-2xl font-semibold text-xs md:text-sm transition-all ${activeTab === 'students' ? 'bg-blue-600 text-white shadow-md' : 'bg-white text-slate-600 border border-slate-100 hover:bg-slate-100'}`}
+            >
+              ④ 수강생 대장 (4회)
+            </button>
+            {!isTeacherMode && (
+              <>
+                <button onClick={() => setActiveTab('rules')} className={`whitespace-nowrap px-4 py-3 md:p-4 rounded-2xl font-semibold text-xs md:text-sm transition-all ${activeTab === 'rules' ? 'bg-blue-600 text-white shadow-md' : 'bg-white text-slate-600 border border-slate-100 hover:bg-slate-100'}`}>① 운영원칙 / 과목</button>
+                <button onClick={() => setActiveTab('ledger')} className={`whitespace-nowrap px-4 py-3 md:p-4 rounded-2xl font-semibold text-xs md:text-sm transition-all ${activeTab === 'ledger' ? 'bg-blue-600 text-white shadow-md' : 'bg-white text-slate-600 border border-slate-100 hover:bg-slate-100'}`}>② 수입·지출 장부</button>
+                <button onClick={() => setActiveTab('receipt')} className={`whitespace-nowrap px-4 py-3 md:p-4 rounded-2xl font-semibold text-xs md:text-sm transition-all ${activeTab === 'receipt' ? 'bg-blue-600 text-white shadow-md' : 'bg-white text-slate-600 border border-slate-100 hover:bg-slate-100'}`}>③ 교습비 영수증</button>
+                <button onClick={() => setActiveTab('staff')} className={`whitespace-nowrap px-4 py-3 md:p-4 rounded-2xl font-semibold text-xs md:text-sm transition-all ${activeTab === 'staff' ? 'bg-blue-600 text-white shadow-md' : 'bg-white text-slate-600 border border-slate-100 hover:bg-slate-100'}`}>⑤ 직원 명부</button>
+              </>
+            )}
+          </div>
+
+          {activeTab === 'timetable' && (
+            <div className="bg-white p-4 md:p-6 rounded-3xl shadow-sm border border-slate-100 space-y-6">
+              <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-2">
+                <div>
+                  <h3 className="font-bold text-slate-900 text-lg">
+                    {isTeacherMode ? `👨‍🏫 ${urlTeacher} 선생님 주간 시간표` : "📅 전체 강사 주간 시간표"}
+                  </h3>
+                  <p className="text-xs text-slate-500 mt-0.5">요일별·시간대별로 배정된 수강생 스케줄을 한눈에 관리하세요.</p>
+                </div>
+                {!isTeacherMode && (
+                  <div className="flex gap-2">
+                    <select 
+                      value={selectedTeacher} 
+                      onChange={e => setSelectedTeacher(e.target.value)} 
+                      className="p-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold"
+                    >
+                      {teacherList.map(t => <option key={t} value={t}>{t} 선생님</option>)}
+                    </select>
+                  </div>
+                )}
+              </div>
+
+              {/* 주간 시간표 그리드 뷰 */}
+              <div className="overflow-x-auto">
+                <div className="min-w-[800px] grid grid-cols-7 gap-2">
+                  {daysOfWeek.map(day => {
+                    const dayStudents = filteredStudents.filter(s => (s.dayOfWeek || '월요일') === day);
+                    return (
+                      <div key={day} className="bg-slate-50/70 border border-slate-200/80 rounded-2xl p-3 space-y-3">
+                        <div className="text-center font-bold text-slate-800 bg-white py-2 rounded-xl shadow-xs border border-slate-100 text-sm">
+                          {day} <span className="text-xs text-blue-600 font-semibold">({dayStudents.length})</span>
+                        </div>
+                        <div className="space-y-2 min-h-[300px]">
+                          {dayStudents.length === 0 ? (
+                            <div className="text-center text-slate-400 text-xs py-10">일정 없음</div>
+                          ) : (
+                            dayStudents
+                              .sort((a, b) => (a.timeSlot || '14:00').localeCompare(b.timeSlot || '14:00'))
+                              .map(s => {
+                                const isDone = (s.lessonCount || 0) >= 4;
+                                return (
+                                  <div key={s.id} className={`p-3 rounded-xl border shadow-2xs space-y-1.5 ${isDone ? 'bg-rose-50 border-rose-200 text-rose-900' : 'bg-white border-slate-200 text-slate-800'}`}>
+                                    <div className="flex justify-between items-center text-xs">
+                                      <span className="font-bold bg-blue-100 text-blue-700 px-1.5 py-0.5 rounded">{s.timeSlot || '시간미정'}</span>
+                                      <span className="text-xs font-bold text-slate-500">{s.lessonCount || 0}/4회</span>
+                                    </div>
+                                    <div className="font-bold text-sm truncate">{s.name}</div>
+                                    <div className="text-[11px] text-slate-500 truncate">{s.course}</div>
+                                    {!isTeacherMode && <div className="text-[10px] text-indigo-600 font-semibold">담당: {s.teacher}</div>}
+                                  </div>
+                                );
+                              })
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
             </div>
           )}
 
-          {(activeTab === 'students' || isTeacherMode) && (
+          {activeTab === 'students' && (
             <div className="space-y-4 md:space-y-6">
               {!isTeacherMode && (
                 <div className="bg-white p-4 rounded-3xl shadow-sm border border-slate-100 space-y-2">
@@ -320,14 +390,10 @@
               )}
 
               {!isTeacherMode && (
-                <form onSubmit={addStudent} className="bg-white p-4 md:p-6 rounded-3xl shadow-sm border border-slate-100 grid grid-cols-1 md:grid-cols-5 gap-3 items-end">
+                <form onSubmit={addStudent} className="bg-white p-4 md:p-6 rounded-3xl shadow-sm border border-slate-100 grid grid-cols-1 md:grid-cols-6 gap-3 items-end">
                   <div>
                     <label className="text-xs font-medium text-slate-500 mb-1 block">수강생 성명</label>
                     <input type="text" placeholder="이름" value={newStudent.name} onChange={e => setNewStudent({...newStudent, name: e.target.value})} className="w-full p-2.5 bg-slate-50 rounded-xl text-sm" />
-                  </div>
-                  <div>
-                    <label className="text-xs font-medium text-slate-500 mb-1 block">생년월일</label>
-                    <input type="date" value={newStudent.birth} onChange={e => setNewStudent({...newStudent, birth: e.target.value})} className="w-full p-2.5 bg-slate-50 rounded-xl text-sm" />
                   </div>
                   <div>
                     <label className="text-xs font-medium text-slate-500 mb-1 block">연락처</label>
@@ -338,6 +404,18 @@
                     <select value={newStudent.course} onChange={e => setNewStudent({...newStudent, course: e.target.value})} className="w-full p-2.5 bg-slate-50 rounded-xl text-sm">
                       <option value="">과목을 선택하세요</option>
                       {(rules.courses || []).map(c => <option key={c.id} value={c.name}>[{c.teacher || '공통'}] {c.name}</option>)}
+                    </select>
+                  </div>
+                  <div>
+                    <label className="text-xs font-medium text-slate-500 mb-1 block">수업 요일</label>
+                    <select value={newStudent.dayOfWeek} onChange={e => setNewStudent({...newStudent, dayOfWeek: e.target.value})} className="w-full p-2.5 bg-slate-50 rounded-xl text-sm">
+                      {daysOfWeek.map(d => <option key={d} value={d}>{d}</option>)}
+                    </select>
+                  </div>
+                  <div>
+                    <label className="text-xs font-medium text-slate-500 mb-1 block">수업 시간</label>
+                    <select value={newStudent.timeSlot} onChange={e => setNewStudent({...newStudent, timeSlot: e.target.value})} className="w-full p-2.5 bg-slate-50 rounded-xl text-sm">
+                      {timeSlots.map(t => <option key={t} value={t}>{t}</option>)}
                     </select>
                   </div>
                   <button type="submit" className="bg-blue-600 text-white font-semibold p-2.5 rounded-xl text-sm hover:bg-blue-700">수강생 등록</button>
@@ -370,6 +448,7 @@
                                   {s.name} <span className="text-xs text-blue-500">▼</span>
                                 </button>
                                 <span className="text-xs bg-slate-200 text-slate-700 px-2 py-0.5 rounded-md font-medium">{s.teacher}</span>
+                                <span className="text-xs bg-indigo-50 text-indigo-700 px-2 py-0.5 rounded-md font-bold">📅 {s.dayOfWeek || '월요일'} {s.timeSlot || '14:00'}</span>
                                 
                                 <div className="flex gap-1.5 items-center">
                                   <button 
