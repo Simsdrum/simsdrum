@@ -119,7 +119,6 @@
             
             [1, 19].forEach(day => {
               const rentDateObj = new Date(y, curr.getMonth(), day);
-              // 오늘 날짜와 같거나 이전인 경우에만 자동 생성
               if (rentDateObj <= today) {
                 const dStr = `${y}-${m}-${String(day).padStart(2, '0')}`;
                 const noteStr = "월세 고정지출";
@@ -1319,7 +1318,7 @@
       );
     }
 
-    ReactDOM.createRoot(getElementById('root')).render(<App />);
+    ReactDOM.createRoot(document.getElementById('root')).render(<App />);
   </script>
 </body>
 </html>
