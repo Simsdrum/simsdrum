@@ -326,70 +326,50 @@
 
         const reader = new FileReader();
 
+        // EUC-KR 인코딩으로 텍스트(HTML)를 안전하게 읽어들입니다.
         reader.onload = (evt) => {
           try {
-            const fileContent = evt.target.result;
+            const htmlText = evt.target.result;
             
-            // HTML 테이블 형식(.xls) 또는 일반 엑셀(.xlsx, .csv) 판별 및 파싱
-            let rowsData = [];
+            // DOMParser를 이용해 HTML 테이블 구조를 완벽하게 파싱
+            const parser = new DOMParser();
+            const doc = parser.parseFromString(htmlText, 'text/html');
+            const rows = doc.querySelectorAll('tr');
 
-            if (file.name.endsWith('.xls') || fileContent.includes('<html') || fileContent.includes('<table')) {
-              const parser = new DOMParser();
-              const doc = parser.parseFromString(fileContent, 'text/html');
-              const tables = doc.querySelectorAll('table');
-              let targetTable = null;
-              let maxRows = 0;
-
-              tables.forEach(t => {
-                if (t.rows.length > maxRows) {
-                  maxRows = t.rows.length;
-                  targetTable = t;
-                }
-              });
-
-              if (!targetTable) {
-                alert("엑셀 파일에서 유효한 표를 찾지 못했습니다.");
-                return;
-              }
-
-              const trs = targetTable.querySelectorAll('tr');
-              trs.forEach(tr => {
-                const cols = Array.from(tr.querySelectorAll('td, th')).map(td => td.textContent.trim());
-                if (cols.length > 0) rowsData.push(cols);
-              });
-            } else {
-              const workbook = XLSX.read(fileContent, { type: 'binary', cellDates: true });
-              const sheetName = workbook.SheetNames[0];
-              rowsData = XLSX.utils.sheet_to_json(workbook.Sheets[sheetName], { header: 1, defval: "" });
+            if (!rows || rows.length === 0) {
+              alert("엑셀 파일에서 데이터를 읽지 못했습니다.");
+              return;
             }
 
             let importedCount = 0;
             const CARD_KEYWORDS = ["NH168", "KB110", "롯데", "삼성카드", "SHC", "현1631", "우6011", "가맹점", "카드"];
 
-            rowsData.forEach((row, idx) => {
-              // 순번(첫번째 열이 숫자)이 있는 실제 거래 데이터 행만 타겟팅
-              if (!row || row.length < 6 || !/^[0-9]+$/.test(String(row[0]).trim())) return;
+            rows.forEach((row, idx) => {
+              const cols = Array.from(row.querySelectorAll('td, th')).map(td => td.textContent.trim());
+              
+              // 첫 번째 열이 숫자인 실제 거래 데이터 행만 추출 (순번)
+              if (cols.length < 8 || !/^[0-9]+$/.test(cols[0])) return;
 
-              const dateRaw = String(row[1] || '').trim();
+              const dateRaw = cols[1] || '';
               const dateMatch = dateRaw.match(/\d{4}[\/.-]\d{1,2}[\/.-]\d{1,2}/);
               if (!dateMatch) return;
 
               const date = dateMatch[0].replace(/\./g, "-").replace(/\//g, "-");
 
-              // 출금금액, 입금금액 정제
-              const withdrawal = Number(String(row[2] || '').replace(/[^0-9]/g, '')) || 0;
-              const deposit = Number(String(row[3] || '').replace(/[^0-9]/g, '')) || 0;
+              // 출금금액(2번 열), 입금금액(3번 열) 숫자 변환
+              const withdrawal = Number((cols[2] || '').replace(/[^0-9]/g, '')) || 0;
+              const deposit = Number((cols[3] || '').replace(/[^0-9]/g, '')) || 0;
 
               if (withdrawal === 0 && deposit === 0) return;
 
-              const content = String(row[5] || '').trim();
-              const memo = String(row[6] || '').trim();
-              const branch = String(row[7] || '').trim();
-              const extraMemo = String(row[8] || '').trim();
+              const content = cols[5] || '';
+              const memo = cols[6] || '';
+              const branch = cols[7] || '';
+              const extraMemo = cols[8] || '';
 
               const fullText = `${content} ${memo} ${branch} ${extraMemo}`;
 
-              // 카드 매입 관련 내역인지 필터링
+              // 카드 매입 및 가맹점 관련 내역 필터링
               const isCardTx = CARD_KEYWORDS.some(keyword => fullText.includes(keyword));
               if (!isCardTx) return;
 
@@ -398,7 +378,7 @@
               else if (fullText.includes("이체")) method = "계좌이체";
 
               const id = String(Date.now()) + "_" + idx + "_" + Math.floor(Math.random() * 1000);
-              const note = [content, memo].filter(Boolean).join(" / ") || "카드매입거래";
+              const noteText = [content, memo].filter(Boolean).join(" / ") || "카드매입거래";
 
               const item = {
                 id,
@@ -406,9 +386,10 @@
                 deposit,
                 withdrawal,
                 method,
-                note: `[카드매입] ${note}`
+                note: `[카드매입] ${noteText}`
               };
 
+              // Firebase 실시간 장부(ledger)에 직접 저장
               if (db) {
                 db.ref(`ledger/${id}`).set(item);
               }
@@ -416,19 +397,19 @@
             });
 
             if (importedCount > 0) {
-              alert(`카드 매입 내역 총 ${importedCount}건이 회계 장부에 정상 등록되었습니다!`);
+              alert(`성공! 카드 매입 내역 총 ${importedCount}건이 회계 장부에 등록되었습니다.`);
             } else {
-              alert("조건에 일치하는 카드 매입 내역을 찾지 못했습니다. 파일 내용을 확인해주세요.");
+              alert("조건에 맞는 카드 매입 내역이 없습니다. 파일 내용을 확인해주세요.");
             }
 
             e.target.value = "";
           } catch (err) {
             console.error(err);
-            alert("엑셀 업로드 및 처리 중 오류가 발생했습니다: " + err.message);
+            alert("처리 중 오류 발생: " + err.message);
           }
         };
 
-        // 농협 .xls(HTML) 파일을 깨지지 않게 읽기 위해 readAsText 사용
+        // 농협 .xls 파일의 고유 인코딩인 euc-kr로 파일 읽기 실행
         reader.readAsText(file, 'euc-kr');
       };
 
