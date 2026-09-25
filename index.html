@@ -328,13 +328,43 @@
 
         reader.onload = (evt) => {
           try {
+            const buffer = evt.target.result;
 
-            const wb = XLSX.read(evt.target.result, {
-              type: "binary",
-              cellDates: true
-            });
+            /*
+             * 농협에서 내려받은 .xls는 실제 XLS 바이너리가 아니라
+             * HTML 형식으로 저장되는 경우가 있습니다.
+             * 이 경우 ArrayBuffer를 HTML 문자열로 읽어서 처리합니다.
+             */
+            const bytes = new Uint8Array(buffer);
+            const preview = new TextDecoder("utf-8").decode(
+              bytes.slice(0, 300)
+            );
+
+            let wb;
+
+            if (
+              preview.trimStart().startsWith("<") ||
+              preview.toLowerCase().includes("<html") ||
+              preview.toLowerCase().includes("<table")
+            ) {
+              const htmlText = new TextDecoder("utf-8").decode(bytes);
+
+              wb = XLSX.read(htmlText, {
+                type: "string",
+                cellDates: true
+              });
+            } else {
+              wb = XLSX.read(buffer, {
+                type: "array",
+                cellDates: true
+              });
+            }
 
             const ws = wb.Sheets[wb.SheetNames[0]];
+
+            if (!ws) {
+              throw new Error("엑셀 시트를 찾을 수 없습니다.");
+            }
 
             const data = XLSX.utils.sheet_to_json(ws, {
               header: 1,
@@ -361,18 +391,23 @@
             ];
 
             data.forEach((row, idx) => {
-
               if (!row || row.length < 7) return;
 
-              const text = row
-                .map(v => String(v).trim())
-                .join(" ");
+              const values = row.map(v => {
+                if (v instanceof Date) {
+                  return v.toISOString();
+                }
+                return String(v ?? "").trim();
+              });
+
+              const text = values.join(" ");
 
               if (
                 text.includes("입출금거래내역조회") ||
                 text.includes("거래일시") ||
                 text.includes("조회일시") ||
-                text.includes("계좌번호")
+                text.includes("계좌번호") ||
+                text.includes("순번")
               ) {
                 return;
               }
@@ -387,26 +422,43 @@
                 .replace(/\./g, "-")
                 .replace(/\//g, "-");
 
+              /*
+               * 농협 입출금 거래내역 구조
+               *
+               * row[0] 순번
+               * row[1] 거래일시
+               * row[2] 출금금액
+               * row[3] 입금금액
+               * row[4] 거래 후 잔액
+               * row[5] 거래내용
+               * row[6] 거래기록사항
+               * row[7] 거래점
+               * row[8] 거래메모
+               */
+
               const transactionType =
-                String(row[5] || "").trim();
+                String(row[5] ?? "").trim();
 
               const memo =
-                String(row[6] || "").trim();
+                String(row[6] ?? "").trim();
+
+              const extraMemo =
+                String(row[8] ?? "").trim();
 
               const note =
-                [transactionType, memo]
+                [transactionType, memo, extraMemo]
                   .filter(Boolean)
                   .join(" / ");
 
-              let withdrawal =
+              const withdrawal =
                 Number(
-                  String(row[2] || "")
+                  String(row[2] ?? "")
                     .replace(/,/g, "")
                 ) || 0;
 
-              let deposit =
+              const deposit =
                 Number(
-                  String(row[3] || "")
+                  String(row[3] ?? "")
                     .replace(/,/g, "")
                 ) || 0;
 
@@ -421,16 +473,10 @@
                 );
 
               /*
-              교육청 제출용
-
-              카드매입
-              bsb
-              조익환
-              퍼커션센터
-
-              만 넣기
-              */
-
+               * 교육청 제출용
+               * 카드매입 / BSB / 비에스비 / 조익환 / 퍼커션센터
+               * 관련 거래만 등록
+               */
               if (
                 !isCardIncome &&
                 !isAcademyExpense
@@ -444,14 +490,17 @@
                 method = "카드";
               }
 
-              if (memo.includes("현금")) {
+              if (
+                memo.includes("현금") ||
+                extraMemo.includes("현금")
+              ) {
                 method = "현금";
               }
 
               const id =
-                String(Date.now())
-                + "_"
-                + idx;
+                String(Date.now()) +
+                "_" +
+                idx;
 
               const item = {
                 id,
@@ -467,26 +516,26 @@
               }
 
               importedCount++;
-
             });
 
             alert(
               `교육청 제출용 거래 ${importedCount}건이 등록되었습니다.`
             );
 
-          } catch (err) {
+            // 같은 파일을 다시 선택할 수 있도록 초기화
+            e.target.value = "";
 
+          } catch (err) {
             console.error(err);
 
             alert(
               "엑셀 업로드 오류\n\n" +
               err.message
             );
-
           }
         };
 
-        reader.readAsBinaryString(file);
+        reader.readAsArrayBuffer(file);
       };
 
       const addStaff = (e) => {
