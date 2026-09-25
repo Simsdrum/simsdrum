@@ -332,18 +332,30 @@
           let importedCount = 0;
 
           data.forEach((row, idx) => {
-            if (idx < 1 || !row || row.length === 0) return;
+            if (idx < 0 || !row || row.length === 0) return;
             const str = row.join(' ');
             const dateMatch = str.match(/\d{4}[-/.]\d{2}[-/.]\d{2}/);
             const date = dateMatch ? dateMatch[0].replace(/\./g, '-') : new Date().toISOString().split('T')[0];
             
-            // 숫자 추출
-            const numbers = row.filter(val => typeof val === 'number' && val > 0);
-            const amount = numbers.length > 0 ? numbers[0] : 0;
+            // 콤마가 포함된 문자열이나 숫자 형태에서 강제로 숫자만 추출하여 금액 파악
+            let amount = 0;
+            for (let cell of row) {
+              if (cell !== undefined && cell !== null) {
+                const cleanedNum = Number(String(cell).replace(/[^0-9]/g, ''));
+                // 10원 이상이고 연도(예: 2026)나 일반 번호가 아닌 확실한 금액 단위(예: 1000 이상)일 때
+                if (!isNaN(cleanedNum) && cleanedNum > 100 && cleanedNum < 1000000000) {
+                  // 날짜 패턴이나 전화번호 등과 겹치지 않는 경우 첫 번째로 발견된 유효 숫자를 금액으로 채택
+                  if (!String(cell).includes('-') && !String(cell).includes('/')) {
+                    amount = cleanedNum;
+                    break;
+                  }
+                }
+              }
+            }
 
             if (amount > 0) {
-              const isWithdrawal = str.includes('매입') || str.includes('지출') || str.includes('출금');
-              const id = String(Date.now() + idx);
+              const isWithdrawal = str.includes('매입') || str.includes('지출') || str.includes('출금') || str.includes('이체출금') || str.includes('결제');
+              const id = String(Date.now() + idx + Math.random());
               const item = {
                 id,
                 date,
