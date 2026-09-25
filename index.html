@@ -326,12 +326,10 @@
 
         const reader = new FileReader();
 
-        // EUC-KR 인코딩으로 텍스트(HTML)를 안전하게 읽어들입니다.
         reader.onload = (evt) => {
           try {
             const htmlText = evt.target.result;
             
-            // DOMParser를 이용해 HTML 테이블 구조를 완벽하게 파싱
             const parser = new DOMParser();
             const doc = parser.parseFromString(htmlText, 'text/html');
             const rows = doc.querySelectorAll('tr');
@@ -342,12 +340,11 @@
             }
 
             let importedCount = 0;
-            const CARD_KEYWORDS = ["NH168", "KB110", "롯데", "삼성카드", "SHC", "현1631", "우6011", "가맹점", "카드"];
 
             rows.forEach((row, idx) => {
               const cols = Array.from(row.querySelectorAll('td, th')).map(td => td.textContent.trim());
               
-              // 첫 번째 열이 숫자인 실제 거래 데이터 행만 추출 (순번)
+              // 첫 번째 열이 숫자인 실제 거래 데이터 행만 추출
               if (cols.length < 8 || !/^[0-9]+$/.test(cols[0])) return;
 
               const dateRaw = cols[1] || '';
@@ -356,29 +353,25 @@
 
               const date = dateMatch[0].replace(/\./g, "-").replace(/\//g, "-");
 
-              // 출금금액(2번 열), 입금금액(3번 열) 숫자 변환
+              // 출금금액(2번 열), 입금금액(3번 열)
               const withdrawal = Number((cols[2] || '').replace(/[^0-9]/g, '')) || 0;
               const deposit = Number((cols[3] || '').replace(/[^0-9]/g, '')) || 0;
 
+              // 금액이 모두 0이면 패스
               if (withdrawal === 0 && deposit === 0) return;
 
               const content = cols[5] || '';
               const memo = cols[6] || '';
               const branch = cols[7] || '';
-              const extraMemo = cols[8] || '';
-
-              const fullText = `${content} ${memo} ${branch} ${extraMemo}`;
-
-              // 카드 매입 및 가맹점 관련 내역 필터링
-              const isCardTx = CARD_KEYWORDS.some(keyword => fullText.includes(keyword));
-              if (!isCardTx) return;
+              
+              const fullText = `${content} ${memo} ${branch}`;
 
               let method = "카드";
               if (fullText.includes("현금")) method = "현금";
-              else if (fullText.includes("이체")) method = "계좌이체";
+              else if (fullText.includes("이체") || fullText.includes("타행")) method = "계좌이체";
 
               const id = String(Date.now()) + "_" + idx + "_" + Math.floor(Math.random() * 1000);
-              const noteText = [content, memo].filter(Boolean).join(" / ") || "카드매입거래";
+              const noteText = [content, memo].filter(Boolean).join(" / ") || "거래내역";
 
               const item = {
                 id,
@@ -386,10 +379,10 @@
                 deposit,
                 withdrawal,
                 method,
-                note: `[카드매입] ${noteText}`
+                note: `[은행연동] ${noteText}`
               };
 
-              // Firebase 실시간 장부(ledger)에 직접 저장
+              // Firebase 장부에 저장
               if (db) {
                 db.ref(`ledger/${id}`).set(item);
               }
@@ -397,9 +390,9 @@
             });
 
             if (importedCount > 0) {
-              alert(`성공! 카드 매입 내역 총 ${importedCount}건이 회계 장부에 등록되었습니다.`);
+              alert(`성공! 총 ${importedCount}건의 거래 내역이 회계 장부에 등록되었습니다.`);
             } else {
-              alert("조건에 맞는 카드 매입 내역이 없습니다. 파일 내용을 확인해주세요.");
+              alert("등록할 수 있는 유효한 거래 내역을 찾지 못했습니다.");
             }
 
             e.target.value = "";
@@ -409,7 +402,6 @@
           }
         };
 
-        // 농협 .xls 파일의 고유 인코딩인 euc-kr로 파일 읽기 실행
         reader.readAsText(file, 'euc-kr');
       };
 
