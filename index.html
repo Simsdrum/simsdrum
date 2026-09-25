@@ -328,85 +328,77 @@
 
         reader.onload = (evt) => {
           try {
-            const buffer = evt.target.result;
-            const bytes = new Uint8Array(buffer);
-            const preview = new TextDecoder("utf-8").decode(bytes.slice(0, 300));
+            const fileContent = evt.target.result;
+            
+            // HTML 테이블 형식(.xls) 또는 일반 엑셀(.xlsx, .csv) 판별 및 파싱
+            let rowsData = [];
 
-            let wb;
-            if (
-              preview.trimStart().startsWith("<") ||
-              preview.toLowerCase().includes("<html") ||
-              preview.toLowerCase().includes("<table")
-            ) {
-              const htmlText = new TextDecoder("utf-8").decode(bytes);
-              wb = XLSX.read(htmlText, { type: "string", cellDates: true });
-            } else {
-              wb = XLSX.read(buffer, { type: "array", cellDates: true });
-            }
+            if (file.name.endsWith('.xls') || fileContent.includes('<html') || fileContent.includes('<table')) {
+              const parser = new DOMParser();
+              const doc = parser.parseFromString(fileContent, 'text/html');
+              const tables = doc.querySelectorAll('table');
+              let targetTable = null;
+              let maxRows = 0;
 
-            const ws = wb.Sheets[wb.SheetNames[0]];
-            if (!ws) {
-              throw new Error("엑셀 시트를 찾을 수 없습니다.");
-            }
-
-            const data = XLSX.utils.sheet_to_json(ws, { header: 1, defval: "" });
-            let importedCount = 0;
-
-            // 카드 매입 및 가맹점 입금 관련 핵심 키워드
-            const CARD_KEYWORDS = [
-              "NH168", "KB110", "롯데", "삼성카드", "삼성카드가맹", 
-              "SHC", "현1631", "우6011", "가맹점", "카드"
-            ];
-
-            data.forEach((row, idx) => {
-              if (!row || row.length < 6) return;
-
-              const values = row.map(v => {
-                if (v instanceof Date) return v.toISOString();
-                return String(v ?? "").trim();
+              tables.forEach(t => {
+                if (t.rows.length > maxRows) {
+                  maxRows = t.rows.length;
+                  targetTable = t;
+                }
               });
 
-              const text = values.join(" ");
-
-              // 헤더 및 불필요한 상단 안내문 제외
-              if (
-                text.includes("입출금거래내역조회") ||
-                text.includes("거래일시") ||
-                text.includes("조회일시") ||
-                text.includes("계좌번호") ||
-                text.includes("순번")
-              ) {
+              if (!targetTable) {
+                alert("엑셀 파일에서 유효한 표를 찾지 못했습니다.");
                 return;
               }
 
-              const dateMatch = text.match(/\d{4}[\/.-]\d{1,2}[\/.-]\d{1,2}/);
+              const trs = targetTable.querySelectorAll('tr');
+              trs.forEach(tr => {
+                const cols = Array.from(tr.querySelectorAll('td, th')).map(td => td.textContent.trim());
+                if (cols.length > 0) rowsData.push(cols);
+              });
+            } else {
+              const workbook = XLSX.read(fileContent, { type: 'binary', cellDates: true });
+              const sheetName = workbook.SheetNames[0];
+              rowsData = XLSX.utils.sheet_to_json(workbook.Sheets[sheetName], { header: 1, defval: "" });
+            }
+
+            let importedCount = 0;
+            const CARD_KEYWORDS = ["NH168", "KB110", "롯데", "삼성카드", "SHC", "현1631", "우6011", "가맹점", "카드"];
+
+            rowsData.forEach((row, idx) => {
+              // 순번(첫번째 열이 숫자)이 있는 실제 거래 데이터 행만 타겟팅
+              if (!row || row.length < 6 || !/^[0-9]+$/.test(String(row[0]).trim())) return;
+
+              const dateRaw = String(row[1] || '').trim();
+              const dateMatch = dateRaw.match(/\d{4}[\/.-]\d{1,2}[\/.-]\d{1,2}/);
               if (!dateMatch) return;
 
               const date = dateMatch[0].replace(/\./g, "-").replace(/\//g, "-");
 
-              const transactionType = String(row[5] ?? "").trim();
-              const memo = String(row[6] ?? "").trim();
-              const branch = String(row[7] ?? "").trim();
-              const extraMemo = String(row[8] ?? "").trim();
+              // 출금금액, 입금금액 정제
+              const withdrawal = Number(String(row[2] || '').replace(/[^0-9]/g, '')) || 0;
+              const deposit = Number(String(row[3] || '').replace(/[^0-9]/g, '')) || 0;
 
-              const note = [transactionType, memo, branch, extraMemo].filter(Boolean).join(" / ");
-              const combinedText = note;
-
-              // 카드 매입 관련 내역인지 확인
-              const isCardTx = CARD_KEYWORDS.some(keyword => combinedText.includes(keyword));
-              if (!isCardTx) return;
-
-              const withdrawal = Number(String(row[2] ?? "").replace(/,/g, "")) || 0;
-              const deposit = Number(String(row[3] ?? "").replace(/,/g, "")) || 0;
-
-              // 금액이 있는 유효한 거래만 등록
               if (withdrawal === 0 && deposit === 0) return;
 
+              const content = String(row[5] || '').trim();
+              const memo = String(row[6] || '').trim();
+              const branch = String(row[7] || '').trim();
+              const extraMemo = String(row[8] || '').trim();
+
+              const fullText = `${content} ${memo} ${branch} ${extraMemo}`;
+
+              // 카드 매입 관련 내역인지 필터링
+              const isCardTx = CARD_KEYWORDS.some(keyword => fullText.includes(keyword));
+              if (!isCardTx) return;
+
               let method = "카드";
-              if (combinedText.includes("현금")) method = "현금";
-              else if (combinedText.includes("이체")) method = "계좌이체";
+              if (fullText.includes("현금")) method = "현금";
+              else if (fullText.includes("이체")) method = "계좌이체";
 
               const id = String(Date.now()) + "_" + idx + "_" + Math.floor(Math.random() * 1000);
+              const note = [content, memo].filter(Boolean).join(" / ") || "카드매입거래";
 
               const item = {
                 id,
@@ -420,20 +412,24 @@
               if (db) {
                 db.ref(`ledger/${id}`).set(item);
               }
-
               importedCount++;
             });
 
-            alert(`카드 매입 내역 총 ${importedCount}건이 회계 장부에 정상 등록되었습니다!`);
-            e.target.value = "";
+            if (importedCount > 0) {
+              alert(`카드 매입 내역 총 ${importedCount}건이 회계 장부에 정상 등록되었습니다!`);
+            } else {
+              alert("조건에 일치하는 카드 매입 내역을 찾지 못했습니다. 파일 내용을 확인해주세요.");
+            }
 
+            e.target.value = "";
           } catch (err) {
             console.error(err);
-            alert("엑셀 업로드 오류\n\n" + err.message);
+            alert("엑셀 업로드 및 처리 중 오류가 발생했습니다: " + err.message);
           }
         };
 
-        reader.readAsArrayBuffer(file);
+        // 농협 .xls(HTML) 파일을 깨지지 않게 읽기 위해 readAsText 사용
+        reader.readAsText(file, 'euc-kr');
       };
 
       const addStaff = (e) => {
