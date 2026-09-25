@@ -65,6 +65,10 @@
       const [editingStaffId, setEditingStaffId] = useState(null);
       const [editStaffData, setEditStaffData] = useState({});
 
+      // 회계 장부 수정 모드 상태
+      const [editingLedgerId, setEditingLedgerId] = useState(null);
+      const [editLedgerData, setEditLedgerData] = useState({});
+
       const [rules, setRules] = useState({
         academyName: "심스드럼실용음악학원",
         regNum: "제 1234호",
@@ -80,7 +84,7 @@
 
       const [newCourse, setNewCourse] = useState({ teacher: "", name: "", fee: "", hours: "4회 / 회당 50분" });
       const [newStudent, setNewStudent] = useState({ name: "", phone: "", course: "", teacher: isTeacherMode ? urlTeacher : "", dayOfWeek: "월요일", timeSlot: "14:00" });
-      const [newLedger, setNewLedger] = useState({ date: new Date().toISOString().split('T')[0], type: "수입", amount: "", method: "카드", note: "" });
+      const [newLedger, setNewLedger] = useState({ date: new Date().toISOString().split('T')[0], deposit: "", withdrawal: "", method: "카드", note: "" });
       const [newStaff, setNewStaff] = useState({ name: "", role: "강사", subject: "드럼", hireDate: new Date().toISOString().split('T')[0], checkCrime: true, checkSex: true });
 
       useEffect(() => {
@@ -231,6 +235,18 @@
         setEditingStaffId(null);
       };
 
+      const saveLedgerEdit = (id) => {
+        const cleaned = {
+          date: editLedgerData.date,
+          deposit: editLedgerData.deposit ? Number(String(editLedgerData.deposit).replace(/[^0-9]/g, '')) : 0,
+          withdrawal: editLedgerData.withdrawal ? Number(String(editLedgerData.withdrawal).replace(/[^0-9]/g, '')) : 0,
+          method: editLedgerData.method,
+          note: editLedgerData.note
+        };
+        if (db) db.ref(`ledger/${id}`).update(cleaned);
+        setEditingLedgerId(null);
+      };
+
       const addStudent = (e) => {
         e.preventDefault();
         if (!newStudent.name) return;
@@ -238,7 +254,6 @@
         let assignedTeacher = isTeacherMode ? urlTeacher : newStudent.teacher;
         let assignedCourse = newStudent.course;
 
-        // 강사명부 연동: 만약 과목만 골랐고 담당 선생님이 비어있다면 강사명부/과목 정보에서 자동 추출
         if (!assignedTeacher && assignedCourse) {
           const foundCourse = (rules.courses || []).find(c => c.name === assignedCourse);
           if (foundCourse && foundCourse.teacher) assignedTeacher = foundCourse.teacher;
@@ -283,11 +298,23 @@
 
       const addLedger = (e) => {
         e.preventDefault();
-        if (!newLedger.amount) return;
+        const depNum = newLedger.deposit ? Number(String(newLedger.deposit).replace(/[^0-9]/g, '')) : 0;
+        const witNum = newLedger.withdrawal ? Number(String(newLedger.withdrawal).replace(/[^0-9]/g, '')) : 0;
+        if (depNum === 0 && witNum === 0) {
+          alert("입금금액 또는 출금금액 중 하나를 입력해주세요.");
+          return;
+        }
         const id = String(Date.now());
-        const newItem = { id, ...newLedger, amount: Number(newLedger.amount) };
+        const newItem = { 
+          id, 
+          date: newLedger.date, 
+          deposit: depNum, 
+          withdrawal: witNum, 
+          method: newLedger.method, 
+          note: newLedger.note 
+        };
         if (db) db.ref(`ledger/${id}`).set(newItem);
-        setNewLedger({ date: new Date().toISOString().split('T')[0], type: "수입", amount: "", method: "카드", note: "" });
+        setNewLedger({ date: new Date().toISOString().split('T')[0], deposit: "", withdrawal: "", method: "카드", note: "" });
       };
 
       const deleteLedger = (id) => {
@@ -309,25 +336,28 @@
             const str = row.join(' ');
             const dateMatch = str.match(/\d{4}[-/.]\d{2}[-/.]\d{2}/);
             const date = dateMatch ? dateMatch[0].replace(/\./g, '-') : new Date().toISOString().split('T')[0];
-            const amount = row.find(val => typeof val === 'number' && val > 0) || 0;
+            
+            // 숫자 추출
+            const numbers = row.filter(val => typeof val === 'number' && val > 0);
+            const amount = numbers.length > 0 ? numbers[0] : 0;
 
             if (amount > 0) {
-              const isIncome = !str.includes('매입') && !str.includes('지출') && !str.includes('출금');
+              const isWithdrawal = str.includes('매입') || str.includes('지출') || str.includes('출금');
               const id = String(Date.now() + idx);
               const item = {
                 id,
                 date,
-                type: isIncome ? "수입" : "지출",
-                amount,
+                deposit: isWithdrawal ? 0 : amount,
+                withdrawal: isWithdrawal ? amount : 0,
                 method: str.includes('현금') ? "현금" : (str.includes('이체') ? "계좌이체" : "카드"),
-                note: `[외부엑셀] ${row[1] || row[0] || '금융/세무 내역'}`
+                note: `[엑셀] ${row[1] || row[0] || '내역'}`
               };
               if (db) db.ref(`ledger/${id}`).set(item);
               importedCount++;
             }
           });
 
-          alert(`외부 엑셀 내역 ${importedCount}건이 클라우드로 자동 저장되었습니다.`);
+          alert(`외부 엑셀 내역 ${importedCount}건이 입금/출금으로 분류되어 저장되었습니다.`);
         };
         reader.readAsBinaryString(file);
       };
@@ -339,7 +369,6 @@
         const newItem = { id, ...newStaff };
         if (db) db.ref(`staff/${id}`).set(newItem);
 
-        // 강사명부에 등록할 때 자동으로 과목 리스트에도 기본 과목 등록 연동
         const defaultCourseName = `${newItem.subject} 전문반 (주1회/4회)`;
         const courseExists = (rules.courses || []).some(c => c.teacher === newItem.name && c.name === defaultCourseName);
         if (!courseExists) {
@@ -373,7 +402,7 @@
           <header className="flex flex-col md:flex-row justify-between items-start md:items-center bg-white p-4 md:p-5 rounded-2xl md:rounded-3xl shadow-sm border border-slate-100 gap-3">
             <div>
               <span className="text-xs font-bold text-blue-600 bg-blue-50 px-3 py-1 rounded-full">
-                {isTeacherMode ? `👨‍🏫 ${urlTeacher} 선생님 전용 페이지` : "👑 원장님 전체 관리 모드 (강사/과목 완벽 연동)"}
+                {isTeacherMode ? `👨‍🏫 ${urlTeacher} 선생님 전용 페이지` : "👑 원장님 전체 관리 모드"}
               </span>
               <h1 className="text-lg md:text-2xl font-bold text-slate-900 mt-1">{rules.academyName} <span className="text-xs md:text-sm font-normal text-slate-500">({rules.regNum})</span></h1>
             </div>
@@ -406,7 +435,7 @@
             {!isTeacherMode && (
               <>
                 <button onClick={() => setActiveTab('rules')} className={`whitespace-nowrap px-3.5 py-2.5 md:p-4 rounded-xl md:rounded-2xl font-semibold text-xs md:text-sm transition-all shrink-0 ${activeTab === 'rules' ? 'bg-blue-600 text-white shadow-md' : 'bg-white text-slate-600 border border-slate-100'}`}>① 과목 (강사명부 연동)</button>
-                <button onClick={() => setActiveTab('ledger')} className={`whitespace-nowrap px-3.5 py-2.5 md:p-4 rounded-xl md:rounded-2xl font-semibold text-xs md:text-sm transition-all shrink-0 ${activeTab === 'ledger' ? 'bg-blue-600 text-white shadow-md' : 'bg-white text-slate-600 border border-slate-100'}`}>② 지출장부</button>
+                <button onClick={() => setActiveTab('ledger')} className={`whitespace-nowrap px-3.5 py-2.5 md:p-4 rounded-xl md:rounded-2xl font-semibold text-xs md:text-sm transition-all shrink-0 ${activeTab === 'ledger' ? 'bg-blue-600 text-white shadow-md' : 'bg-white text-slate-600 border border-slate-100'}`}>② 회계 장부(입출금)</button>
                 <button onClick={() => setActiveTab('receipt')} className={`whitespace-nowrap px-3.5 py-2.5 md:p-4 rounded-xl md:rounded-2xl font-semibold text-xs md:text-sm transition-all shrink-0 ${activeTab === 'receipt' ? 'bg-blue-600 text-white shadow-md' : 'bg-white text-slate-600 border border-slate-100'}`}>③ 영수증</button>
                 <button onClick={() => setActiveTab('staff')} className={`whitespace-nowrap px-3.5 py-2.5 md:p-4 rounded-xl md:rounded-2xl font-semibold text-xs md:text-sm transition-all shrink-0 ${activeTab === 'staff' ? 'bg-blue-600 text-white shadow-md' : 'bg-white text-slate-600 border border-slate-100'}`}>⑤ 강사명부</button>
               </>
@@ -514,7 +543,6 @@
                 </div>
               )}
 
-              {/* 선생님 본인 화면이거나 원장님 화면 모두에서 수강생 등록 가능 */}
               <form onSubmit={addStudent} className="bg-white p-4 md:p-6 rounded-2xl md:rounded-3xl shadow-sm border border-slate-100 grid grid-cols-1 md:grid-cols-6 gap-2.5 items-end">
                 <div>
                   <label className="text-xs font-medium text-slate-500 mb-1 block">이름</label>
@@ -824,60 +852,97 @@
 
           {activeTab === 'ledger' && !isTeacherMode && (
             <div className="space-y-4">
-              <form onSubmit={addLedger} className="bg-white p-4 rounded-2xl shadow-sm border border-slate-100 grid grid-cols-1 md:grid-cols-5 gap-2.5 items-end">
+              <form onSubmit={addLedger} className="bg-white p-4 rounded-2xl shadow-sm border border-slate-100 grid grid-cols-1 md:grid-cols-6 gap-2.5 items-end text-xs">
                 <div>
-                  <label className="text-xs font-medium text-slate-500 mb-1 block">일자</label>
-                  <input type="date" value={newLedger.date} onChange={e => setNewLedger({...newLedger, date: e.target.value})} className="w-full p-2.5 bg-slate-50 rounded-xl text-xs" />
+                  <label className="text-slate-500 mb-1 block">일자</label>
+                  <input type="date" value={newLedger.date} onChange={e => setNewLedger({...newLedger, date: e.target.value})} className="w-full p-2.5 bg-slate-50 rounded-xl" />
                 </div>
                 <div>
-                  <label className="text-xs font-medium text-slate-500 mb-1 block">구분/수단</label>
-                  <div className="flex gap-1">
-                    <select value={newLedger.type} onChange={e => setNewLedger({...newLedger, type: e.target.value})} className="w-1/2 p-2.5 bg-slate-50 rounded-xl text-xs">
-                      <option>수입</option>
-                      <option>지출</option>
-                    </select>
-                    <select value={newLedger.method} onChange={e => setNewLedger({...newLedger, method: e.target.value})} className="w-1/2 p-2.5 bg-slate-50 rounded-xl text-xs">
-                      <option>카드</option>
-                      <option>계좌이체</option>
-                      <option>현금</option>
-                    </select>
-                  </div>
+                  <label className="text-slate-500 mb-1 block font-bold text-emerald-600">💰 입금금액 (수입)</label>
+                  <input type="number" placeholder="0" value={newLedger.deposit} onChange={e => setNewLedger({...newLedger, deposit: e.target.value})} className="w-full p-2.5 bg-emerald-50/50 border border-emerald-200 rounded-xl font-bold text-emerald-700" />
                 </div>
                 <div>
-                  <label className="text-xs font-medium text-slate-500 mb-1 block">금액</label>
-                  <input type="number" placeholder="원" value={newLedger.amount} onChange={e => setNewLedger({...newLedger, amount: e.target.value})} className="w-full p-2.5 bg-slate-50 rounded-xl text-xs" />
+                  <label className="text-slate-500 mb-1 block font-bold text-rose-600">💸 출금금액 (지출)</label>
+                  <input type="number" placeholder="0" value={newLedger.withdrawal} onChange={e => setNewLedger({...newLedger, withdrawal: e.target.value})} className="w-full p-2.5 bg-rose-50/50 border border-rose-200 rounded-xl font-bold text-rose-700" />
                 </div>
                 <div>
-                  <label className="text-xs font-medium text-slate-500 mb-1 block">적요</label>
-                  <input type="text" placeholder="내역" value={newLedger.note} onChange={e => setNewLedger({...newLedger, note: e.target.value})} className="w-full p-2.5 bg-slate-50 rounded-xl text-xs" />
+                  <label className="text-slate-500 mb-1 block">거래수단</label>
+                  <select value={newLedger.method} onChange={e => setNewLedger({...newLedger, method: e.target.value})} className="w-full p-2.5 bg-slate-50 rounded-xl">
+                    <option>카드</option>
+                    <option>계좌이체</option>
+                    <option>현금</option>
+                  </select>
                 </div>
-                <button type="submit" className="bg-blue-600 text-white font-semibold p-2.5 rounded-xl text-xs hover:bg-blue-700">내역 등록</button>
+                <div>
+                  <label className="text-slate-500 mb-1 block">적요 및 메모</label>
+                  <input type="text" placeholder="예: 레슨비 수납" value={newLedger.note} onChange={e => setNewLedger({...newLedger, note: e.target.value})} className="w-full p-2.5 bg-slate-50 rounded-xl" />
+                </div>
+                <button type="submit" className="bg-blue-600 text-white font-semibold p-2.5 rounded-xl hover:bg-blue-700">장부 등록</button>
               </form>
 
               <div className="bg-white p-4 rounded-2xl shadow-sm border border-slate-100 overflow-x-auto">
                 <h3 className="font-bold text-slate-900 mb-3 text-sm">회계 장부 내역 ({ledger.length}건)</h3>
-                <table className="w-full text-left text-xs min-w-[450px]">
+                <table className="w-full text-left text-xs min-w-[700px]">
                   <thead className="bg-slate-50 text-slate-500">
                     <tr>
                       <th className="p-3">일자</th>
-                      <th className="p-3">구분</th>
+                      <th className="p-3 text-right text-emerald-600">입금금액 (+)</th>
+                      <th className="p-3 text-right text-rose-600">출금금액 (-)</th>
                       <th className="p-3">수단</th>
                       <th className="p-3">적요</th>
-                      <th className="p-3 text-right">금액</th>
-                      <th className="p-3 text-center">삭제</th>
+                      <th className="p-3 text-center">수정 / 삭제</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100">
-                    {ledger.map(item => (
-                      <tr key={item.id}>
-                        <td className="p-3 text-slate-600">{item.date}</td>
-                        <td className="p-3"><span className={`px-2 py-0.5 rounded text-[10px] font-semibold ${item.type === '수입' ? 'bg-emerald-50 text-emerald-600' : 'bg-rose-50 text-rose-600'}`}>{item.type}</span></td>
-                        <td className="p-3 text-slate-600">{item.method}</td>
-                        <td className="p-3 font-medium">{item.note}</td>
-                        <td className={`p-3 text-right font-bold ${item.type === '수입' ? 'text-emerald-600' : 'text-rose-600'}`}>{item.type === '수입' ? '+' : '-'}{(item.amount || 0).toLocaleString()}원</td>
-                        <td className="p-3 text-center"><button onClick={() => deleteLedger(item.id)} className="text-slate-400 hover:text-rose-500">삭제</button></td>
-                      </tr>
-                    ))}
+                    {ledger.map(item => {
+                      const isEditing = editingLedgerId === item.id;
+                      return (
+                        <tr key={item.id}>
+                          <td className="p-3 text-slate-600">
+                            {isEditing ? <input type="date" value={editLedgerData.date !== undefined ? editLedgerData.date : item.date} onChange={e => setEditLedgerData({...editLedgerData, date: e.target.value})} className="p-1 border rounded text-xs" /> : item.date}
+                          </td>
+                          <td className="p-3 text-right font-bold text-emerald-600">
+                            {isEditing ? (
+                              <input type="number" value={editLedgerData.deposit !== undefined ? editLedgerData.deposit : item.deposit} onChange={e => setEditLedgerData({...editLedgerData, deposit: e.target.value})} className="p-1 border rounded text-xs w-24 text-right" />
+                            ) : (
+                              item.deposit > 0 ? `+${Number(item.deposit).toLocaleString()}원` : '-'
+                            )}
+                          </td>
+                          <td className="p-3 text-right font-bold text-rose-600">
+                            {isEditing ? (
+                              <input type="number" value={editLedgerData.withdrawal !== undefined ? editLedgerData.withdrawal : item.withdrawal} onChange={e => setEditLedgerData({...editLedgerData, withdrawal: e.target.value})} className="p-1 border rounded text-xs w-24 text-right" />
+                            ) : (
+                              item.withdrawal > 0 ? `-${Number(item.withdrawal).toLocaleString()}원` : '-'
+                            )}
+                          </td>
+                          <td className="p-3 text-slate-600">
+                            {isEditing ? (
+                              <select value={editLedgerData.method !== undefined ? editLedgerData.method : item.method} onChange={e => setEditLedgerData({...editLedgerData, method: e.target.value})} className="p-1 border rounded text-xs">
+                                <option>카드</option>
+                                <option>계좌이체</option>
+                                <option>현금</option>
+                              </select>
+                            ) : item.method}
+                          </td>
+                          <td className="p-3 font-medium">
+                            {isEditing ? <input type="text" value={editLedgerData.note !== undefined ? editLedgerData.note : item.note} onChange={e => setEditLedgerData({...editLedgerData, note: e.target.value})} className="p-1 border rounded text-xs w-full" /> : item.note}
+                          </td>
+                          <td className="p-3 text-center space-x-1">
+                            {isEditing ? (
+                              <>
+                                <button onClick={() => saveLedgerEdit(item.id)} className="bg-emerald-600 text-white px-2 py-1 rounded text-[11px] font-bold">저장</button>
+                                <button onClick={() => setEditingLedgerId(null)} className="bg-slate-200 text-slate-700 px-2 py-1 rounded text-[11px]">취소</button>
+                              </>
+                            ) : (
+                              <>
+                                <button onClick={() => { setEditingLedgerId(item.id); setEditLedgerData({ date: item.date, deposit: item.deposit || 0, withdrawal: item.withdrawal || 0, method: item.method, note: item.note }); }} className="bg-slate-100 hover:bg-slate-200 text-slate-700 px-2 py-1 rounded text-[11px]">✏️ 수정</button>
+                                <button onClick={() => deleteLedger(item.id)} className="text-slate-400 hover:text-rose-500 text-[11px]">삭제</button>
+                              </>
+                            )}
+                          </td>
+                        </tr>
+                      );
+                    })}
                   </tbody>
                 </table>
               </div>
@@ -888,7 +953,7 @@
             <div className="bg-white p-4 rounded-2xl shadow-sm border border-slate-100 space-y-3">
               <h3 className="font-bold text-slate-900 text-sm">교습비 수납 영수증 원부</h3>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                {ledger.filter(l => l.type === '수입').map(item => (
+                {ledger.filter(l => (l.deposit || 0) > 0).map(item => (
                   <div key={item.id} className="border border-slate-200 p-4 rounded-xl space-y-2 bg-slate-50/30 text-xs">
                     <div className="flex justify-between items-center border-b pb-2">
                       <span className="font-bold text-slate-800">교습비 납부 영수증</span>
@@ -899,8 +964,8 @@
                       <p>적요: <span className="font-semibold">{item.note}</span></p>
                     </div>
                     <div className="pt-2 border-t text-right">
-                      <span className="text-[11px] text-slate-400 mr-2">금액</span>
-                      <span className="text-sm font-bold text-blue-600">{(item.amount || 0).toLocaleString()}원</span>
+                      <span className="text-[11px] text-slate-400 mr-2">입금 금액</span>
+                      <span className="text-sm font-bold text-blue-600">+{(item.deposit || 0).toLocaleString()}원</span>
                     </div>
                   </div>
                 ))}
