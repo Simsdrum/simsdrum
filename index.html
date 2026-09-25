@@ -329,79 +329,46 @@
         reader.onload = (evt) => {
           try {
             const buffer = evt.target.result;
-
-            /*
-             * 농협에서 내려받은 .xls는 실제 XLS 바이너리가 아니라
-             * HTML 형식으로 저장되는 경우가 있습니다.
-             * 이 경우 ArrayBuffer를 HTML 문자열로 읽어서 처리합니다.
-             */
             const bytes = new Uint8Array(buffer);
-            const preview = new TextDecoder("utf-8").decode(
-              bytes.slice(0, 300)
-            );
+            const preview = new TextDecoder("utf-8").decode(bytes.slice(0, 300));
 
             let wb;
-
             if (
               preview.trimStart().startsWith("<") ||
               preview.toLowerCase().includes("<html") ||
               preview.toLowerCase().includes("<table")
             ) {
               const htmlText = new TextDecoder("utf-8").decode(bytes);
-
-              wb = XLSX.read(htmlText, {
-                type: "string",
-                cellDates: true
-              });
+              wb = XLSX.read(htmlText, { type: "string", cellDates: true });
             } else {
-              wb = XLSX.read(buffer, {
-                type: "array",
-                cellDates: true
-              });
+              wb = XLSX.read(buffer, { type: "array", cellDates: true });
             }
 
             const ws = wb.Sheets[wb.SheetNames[0]];
-
             if (!ws) {
               throw new Error("엑셀 시트를 찾을 수 없습니다.");
             }
 
-            const data = XLSX.utils.sheet_to_json(ws, {
-              header: 1,
-              defval: ""
-            });
-
+            const data = XLSX.utils.sheet_to_json(ws, { header: 1, defval: "" });
             let importedCount = 0;
 
-            const CARD_PATTERNS = [
-              "NH168",
-              "KB110",
-              "롯데",
-              "삼성카드가맹",
-              "SHC",
-              "현1631",
-              "우6011"
-            ];
-
-            const EXPENSE_PATTERNS = [
-              "비에스비",
-              "BSB",
-              "조익환",
-              "퍼커션센터"
+            // 카드 매입 및 가맹점 입금 관련 핵심 키워드
+            const CARD_KEYWORDS = [
+              "NH168", "KB110", "롯데", "삼성카드", "삼성카드가맹", 
+              "SHC", "현1631", "우6011", "가맹점", "카드"
             ];
 
             data.forEach((row, idx) => {
-              if (!row || row.length < 7) return;
+              if (!row || row.length < 6) return;
 
               const values = row.map(v => {
-                if (v instanceof Date) {
-                  return v.toISOString();
-                }
+                if (v instanceof Date) return v.toISOString();
                 return String(v ?? "").trim();
               });
 
               const text = values.join(" ");
 
+              // 헤더 및 불필요한 상단 안내문 제외
               if (
                 text.includes("입출금거래내역조회") ||
                 text.includes("거래일시") ||
@@ -412,95 +379,34 @@
                 return;
               }
 
-              const dateMatch = text.match(
-                /\d{4}[\/.-]\d{1,2}[\/.-]\d{1,2}/
-              );
-
+              const dateMatch = text.match(/\d{4}[\/.-]\d{1,2}[\/.-]\d{1,2}/);
               if (!dateMatch) return;
 
-              const date = dateMatch[0]
-                .replace(/\./g, "-")
-                .replace(/\//g, "-");
+              const date = dateMatch[0].replace(/\./g, "-").replace(/\//g, "-");
 
-              /*
-               * 농협 입출금 거래내역 구조
-               *
-               * row[0] 순번
-               * row[1] 거래일시
-               * row[2] 출금금액
-               * row[3] 입금금액
-               * row[4] 거래 후 잔액
-               * row[5] 거래내용
-               * row[6] 거래기록사항
-               * row[7] 거래점
-               * row[8] 거래메모
-               */
+              const transactionType = String(row[5] ?? "").trim();
+              const memo = String(row[6] ?? "").trim();
+              const branch = String(row[7] ?? "").trim();
+              const extraMemo = String(row[8] ?? "").trim();
 
-              const transactionType =
-                String(row[5] ?? "").trim();
+              const note = [transactionType, memo, branch, extraMemo].filter(Boolean).join(" / ");
+              const combinedText = note;
 
-              const memo =
-                String(row[6] ?? "").trim();
+              // 카드 매입 관련 내역인지 확인
+              const isCardTx = CARD_KEYWORDS.some(keyword => combinedText.includes(keyword));
+              if (!isCardTx) return;
 
-              const extraMemo =
-                String(row[8] ?? "").trim();
+              const withdrawal = Number(String(row[2] ?? "").replace(/,/g, "")) || 0;
+              const deposit = Number(String(row[3] ?? "").replace(/,/g, "")) || 0;
 
-              const note =
-                [transactionType, memo, extraMemo]
-                  .filter(Boolean)
-                  .join(" / ");
+              // 금액이 있는 유효한 거래만 등록
+              if (withdrawal === 0 && deposit === 0) return;
 
-              const withdrawal =
-                Number(
-                  String(row[2] ?? "")
-                    .replace(/,/g, "")
-                ) || 0;
+              let method = "카드";
+              if (combinedText.includes("현금")) method = "현금";
+              else if (combinedText.includes("이체")) method = "계좌이체";
 
-              const deposit =
-                Number(
-                  String(row[3] ?? "")
-                    .replace(/,/g, "")
-                ) || 0;
-
-              const isCardIncome =
-                CARD_PATTERNS.some(keyword =>
-                  note.includes(keyword)
-                );
-
-              const isAcademyExpense =
-                EXPENSE_PATTERNS.some(keyword =>
-                  note.includes(keyword)
-                );
-
-              /*
-               * 교육청 제출용
-               * 카드매입 / BSB / 비에스비 / 조익환 / 퍼커션센터
-               * 관련 거래만 등록
-               */
-              if (
-                !isCardIncome &&
-                !isAcademyExpense
-              ) {
-                return;
-              }
-
-              let method = "계좌이체";
-
-              if (isCardIncome) {
-                method = "카드";
-              }
-
-              if (
-                memo.includes("현금") ||
-                extraMemo.includes("현금")
-              ) {
-                method = "현금";
-              }
-
-              const id =
-                String(Date.now()) +
-                "_" +
-                idx;
+              const id = String(Date.now()) + "_" + idx + "_" + Math.floor(Math.random() * 1000);
 
               const item = {
                 id,
@@ -508,7 +414,7 @@
                 deposit,
                 withdrawal,
                 method,
-                note
+                note: `[카드매입] ${note}`
               };
 
               if (db) {
@@ -518,20 +424,12 @@
               importedCount++;
             });
 
-            alert(
-              `교육청 제출용 거래 ${importedCount}건이 등록되었습니다.`
-            );
-
-            // 같은 파일을 다시 선택할 수 있도록 초기화
+            alert(`카드 매입 내역 총 ${importedCount}건이 회계 장부에 정상 등록되었습니다!`);
             e.target.value = "";
 
           } catch (err) {
             console.error(err);
-
-            alert(
-              "엑셀 업로드 오류\n\n" +
-              err.message
-            );
+            alert("엑셀 업로드 오류\n\n" + err.message);
           }
         };
 
