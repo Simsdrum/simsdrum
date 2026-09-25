@@ -1,58 +1,90 @@
 const handleFileUpload = (e) => {
   const file = e.target.files[0];
   if (!file) return;
+
   const reader = new FileReader();
+
   reader.onload = (evt) => {
     try {
-      const wb = XLSX.read(evt.target.result, { type: 'binary' });
+      const workbook = XLSX.read(evt.target.result, {
+        type: "binary",
+        cellDates: true
+      });
 
-      // 은행 엑셀 파일은 표(table)가 여러 개 들어있는 경우가 많아
-      // "거래일시" 헤더가 있는 시트를 실제 데이터 시트로 자동 탐색
-      let targetSheetName = null;
-      let headerRowIdx = -1;
-      let headerRow = null;
+      const sheet = workbook.Sheets[workbook.SheetNames[0]];
 
-      for (const sheetName of wb.SheetNames) {
-        const rows = XLSX.utils.sheet_to_json(wb.Sheets[sheetName], { header: 1 });
-        for (let r = 0; r < rows.length; r++) {
-          const rowJoined = (rows[r] || []).join('|');
-          if (rowJoined.includes('거래일시') && (rowJoined.includes('입금') || rowJoined.includes('출금'))) {
-            targetSheetName = sheetName;
-            headerRowIdx = r;
-            headerRow = rows[r];
-            break;
-          }
-        }
-        if (targetSheetName) break;
-      }
-
-      if (!targetSheetName) {
-        alert("업로드하신 파일에서 '거래일시' 헤더를 찾지 못했습니다. 은행 원본 파일 형식을 확인해주세요.");
-        return;
-      }
-
-      const data = XLSX.utils.sheet_to_json(wb.Sheets[targetSheetName], { header: 1 });
-
-      // 컬럼 위치를 인덱스 하드코딩 대신 헤더 텍스트로 매칭 (은행마다 컬럼 순서가 달라도 안전)
-      const findCol = (keyword) => headerRow.findIndex(h => String(h || '').includes(keyword));
-      const dateCol = findCol('거래일시');
-      const withdrawCol = findCol('출금');
-      const depositCol = findCol('입금');
-      const contentCol = findCol('거래내용');
-      const memoCol = findCol('거래기록사항');
+      const rows = XLSX.utils.sheet_to_json(sheet, {
+        header: 1,
+        defval: ""
+      });
 
       let importedCount = 0;
 
-      data.forEach((row, idx) => {
-        if (idx <= headerRowIdx || !row || row.length === 0) return;
+      rows.forEach((row, index) => {
 
-        const rawDate = dateCol >= 0 ? row[dateCol] : '';
-        const dateMatch = String(rawDate).match(/\d{4}[-/.]\d{1,2}[-/.]\d{1,2}/);
-        const date = dateMatch
-          ? dateMatch[0].replace(/[/.]/g, '-')
-          : new Date().toISOString().split('T')[0];
+        if (!row || row.length < 7) return;
 
-        const toNumber = (v) => {
-          if (v === undefined || v === null || v === '') return 0;
-          const n = Number(String(v).replace(/[^0-9.]/g, ''));
-          return
+        const rowText = row.join(" ");
+
+        if (
+          rowText.includes("거래일시") ||
+          rowText.includes("입출금거래내역조회") ||
+          rowText.includes("조회일시")
+        ) {
+          return;
+        }
+
+        const dateMatch = rowText.match(/\d{4}[\/.-]\d{1,2}[\/.-]\d{1,2}/);
+
+        if (!dateMatch) return;
+
+        const date = dateMatch[0]
+          .replace(/\./g, "-")
+          .replace(/\//g, "-");
+
+        let withdrawal = 0;
+        let deposit = 0;
+
+        const nums = row
+          .map(v => Number(String(v).replace(/[^0-9]/g, "")))
+          .filter(v => !isNaN(v));
+
+        if (nums.length >= 4) {
+          withdrawal = Number(nums[2]) || 0;
+          deposit = Number(nums[3]) || 0;
+        }
+
+        const transactionType = row[5] || "";
+        const memo = row[6] || "";
+
+        const note = `${transactionType}${memo ? " / " + memo : ""}`;
+
+        let method = "계좌이체";
+
+        const cardKeywords = [
+          "NH카드",
+          "KB카드",
+          "삼성카드가맹",
+          "롯데",
+          "SHC",
+          "현1631",
+          "우6011",
+          "카드"
+        ];
+
+        if (
+          cardKeywords.some(k => note.includes(k))
+        ) {
+          method = "카드";
+        }
+
+        if (
+          note.includes("현금") ||
+          memo.includes("현금")
+        ) {
+          method = "현금";
+        }
+
+        const id = String(Date.now() + index);
+
+      
