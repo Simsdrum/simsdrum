@@ -320,7 +320,7 @@
         if (db) db.ref(`ledger/${id}`).remove();
       };
 
-      // [업데이트된 초강력 엑셀 파싱 로직]
+      // [업데이트된 은행 맞춤형 엑셀 파싱 로직]
       const handleFileUpload = (e) => {
         const file = e.target.files[0];
         if (!file) return;
@@ -332,64 +332,88 @@
             const data = XLSX.utils.sheet_to_json(ws, { header: 1 });
             let importedCount = 0;
 
+            // 첫 번째 줄(헤더)을 제외하고 데이터 행부터 탐색
             data.forEach((row, idx) => {
-              if (!row || row.length === 0) return;
+              if (idx === 0 || !row || row.length === 0) return;
+
+              const rowStr = row.join(' ');
               
-              const str = row.join(' ');
-              
-              // 날짜 찾기 (없으면 오늘 날짜)
-              const dateMatch = str.match(/\d{4}[-/.]\d{1,2}[-/.]\d{1,2}/);
+              // 1. 날짜 추출 (예: 2026/09/24 또는 2026-09-24)
+              const dateMatch = rowStr.match(/\d{4}[-/.]\d{1,2}[-/.]\d{1,2}/);
               const date = dateMatch ? dateMatch[0].replace(/\./g, '-') : new Date().toISOString().split('T')[0];
-              
-              // 행 내의 모든 셀에서 숫자를 추출하여 가장 적절한 금액 찾기
-              let amount = 0;
-              for (let cell of row) {
-                if (cell !== undefined && cell !== null) {
-                  const cleaned = Number(String(cell).replace(/[^0-9]/g, ''));
-                  // 10원 이상이고 너무 큰 값(예: 주민번호, 계좌번호 등)이 아닌 경우를 금액으로 채택
-                  if (!isNaN(cleaned) && cleaned >= 10 && cleaned < 1000000000) {
-                    // 셀 내용이 연도 단독이거나 날짜 형식이 아닌 경우 우선 선택
-                    const cellStr = String(cell);
-                    if (!cellStr.includes('-') && !cellStr.includes('/') && cellStr.length <= 12) {
-                      amount = cleaned;
-                      break;
+
+              // 2. 출금금액(원)과 입금금액(원) 정확히 매칭 (일반적으로 2번, 3번 컬럼 또는 셀 숫자값)
+              let withdrawal = 0;
+              let deposit = 0;
+
+              // 각 셀의 숫자를 분석하여 0이 아닌 유효 금액 추출
+              // 보통 출금 컬럼 혹은 입금 컬럼에 숫자 존재
+              for (let i = 1; i < row.length; i++) {
+                const val = row[i];
+                if (val !== undefined && val !== null && val !== '') {
+                  const cleaned = Number(String(val).replace(/[^0-9]/g, ''));
+                  // 1원 이상이고 날짜나 순번, 잔액(거래 후 잔액)이 아닌 명확한 거래 금액 범위
+                  if (!isNaN(cleaned) && cleaned > 0 && cleaned < 100000000) {
+                    const cellStr = String(val);
+                    // 날짜나 연도가 아닌 경우
+                    if (!cellStr.includes('-') && !cellStr.includes('/') && cellStr.length <= 10) {
+                      // 출금인지 입금인지 판단 (컬럼 헤더명 혹은 위치 기반)
+                      // 이미지 기준으로 2번째(인덱스 2)가 출금, 3번째(인덱스 3)가 입금임
+                      if (i === 2) {
+                        withdrawal = cleaned;
+                      } else if (i === 3) {
+                        deposit = cleaned;
+                      } else if (i !== 4 && i !== 0 && i !== 1) { 
+                        // 만약 컬럼 위치가 다를 경우 일반적인 휴리스틱 처리
+                        if (rowStr.includes('출금') && i === 2) withdrawal = cleaned;
+                        else if (i === 3) deposit = cleaned;
+                      }
                     }
                   }
                 }
               }
 
-              // 만약 금액을 찾지 못했다면 행 전체 문자열에서 숫자 패턴 탐색
-              if (amount === 0) {
-                const numMatches = str.match(/\b\d{1,3}(,\d{3})*|\b\d{4,}\b/g);
-                if (numMatches && numMatches.length > 0) {
-                  const candidate = Number(numMatches[numMatches.length - 1].replace(/,/g, ''));
-                  if (candidate >= 10) amount = candidate;
+              // 만약 위에서 명확히 안 잡혔다면 행 전체에서 금액 후보군 탐색
+              if (withdrawal === 0 && deposit === 0) {
+                // 숫자로 된 데이터 중 잔액(보통 5번째 컬럼)을 제외하고 가장 적절한 금액 찾기
+                for (let i = 2; i <= 3; i++) {
+                  if (row[i] !== undefined) {
+                    const amt = Number(String(row[i]).replace(/[^0-9]/g, ''));
+                    if (!isNaN(amt) && amt > 0) {
+                      if (i === 2) withdrawal = amt;
+                      if (i === 3) deposit = amt;
+                    }
+                  }
                 }
               }
 
-              // 금액이 0보다 크면 무조건 장부에 등록
-              if (amount > 0) {
-                const isWithdrawal = str.includes('매입') || str.includes('지출') || str.includes('출금') || str.includes('이체출금') || str.includes('결제') || str.includes('-');
+              // 출금이나 입금 중 하나라도 금액이 존재하면 장부에 추가
+              if (withdrawal > 0 || deposit > 0) {
                 const id = String(Date.now() + idx + Math.random());
-                const noteText = row.find(c => typeof c === 'string' && c.length > 1 && !c.includes('-')) || row[0] || '엑셀 내역';
                 
+                // 거래내용 및 기록사항 조합 (예: 결제지방세, 실시간이체 등)
+                const content = row[5] || ''; // 거래내용
+                const memo = row[6] || '';    // 거래기록사항
+                const noteText = [content, memo].filter(Boolean).join(' / ') || '은행거래내역';
+
                 const item = {
                   id,
                   date,
-                  deposit: isWithdrawal ? 0 : amount,
-                  withdrawal: isWithdrawal ? amount : 0,
-                  method: str.includes('현금') ? "현금" : (str.includes('이체') ? "계좌이체" : "카드"),
-                  note: `[엑셀] ${String(noteText).slice(0, 30)}`
+                  deposit: deposit,
+                  withdrawal: withdrawal,
+                  method: rowStr.includes('현금') ? "현금" : (rowStr.includes('이체') ? "계좌이체" : "카드"),
+                  note: `[은행] ${noteText}`
                 };
+
                 if (db) db.ref(`ledger/${id}`).set(item);
                 importedCount++;
               }
             });
 
-            alert(`엑셀 연동 완료! 총 ${importedCount}건의 내역이 회계 장부에 반영되었습니다.`);
+            alert(`엑셀 연동 성공! 총 ${importedCount}건의 거래 내역이 회계 장부에 정상 등록되었습니다.`);
           } catch (err) {
             console.error(err);
-            alert("엑셀 파일을 읽는 중 오류가 발생했습니다. 파일 형식을 확인해주세요.");
+            alert("엑셀 파일을 처리하는 중 오류가 발생했습니다.");
           }
         };
         reader.readAsBinaryString(file);
@@ -442,7 +466,7 @@
             {!isTeacherMode && (
               <div className="flex gap-2 w-full md:w-auto">
                 <label className="flex-1 md:flex-none text-center bg-emerald-600 hover:bg-emerald-700 text-white font-medium px-3.5 py-2.5 rounded-xl shadow-sm text-xs cursor-pointer transition-all">
-                  📊 외부 엑셀 연동
+                  📊 은행 엑셀 내역 업로드
                   <input type="file" accept=".xlsx, .xls, .csv" onChange={handleFileUpload} className="hidden" />
                 </label>
                 <button onClick={() => window.print()} className="flex-1 md:flex-none bg-blue-600 hover:bg-blue-700 text-white font-medium px-3.5 py-2.5 rounded-xl shadow-sm text-xs transition-all">
